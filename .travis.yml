@@ -69,3 +69,4 @@ script:
 after_script: 
   - kill $(ps aux | grep '[b]in/sc' | awk '{print $2}')
   - sleep 5
+
