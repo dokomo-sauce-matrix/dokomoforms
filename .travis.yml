@@ -64,9 +64,3 @@ before_script:
 # command to run tests
 script: 
   - nosetests tests.selenium_test
-
-# necessary to close the Sauce Connect tunnel properly
-after_script: 
-  - kill $(ps aux | grep '[b]in/sc' | awk '{print $2}')
-  - sleep 5
-
