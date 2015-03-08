@@ -59,7 +59,7 @@ before_script:
   - python3 manage_db.py
   - psql -U postgres -d doko -f tests/fixtures/all-encompassing.sql
   - echo 'APP_DEBUG=True' > dokomoforms/local_settings.py
-  - echo 'SAUCE_CONNECT=True' > dokomoforms/local_settings.py
+  - echo 'SAUCE_CONNECT=True' >> dokomoforms/local_settings.py
   - python3 webapp.py &
 
 # command to run tests
