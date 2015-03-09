@@ -4,8 +4,8 @@ python:
 sudo: false
 env:
   global:
-    - secure: SWCdeQwdJBy2BKsYW4wd9UELMvF6yrBa9LDJ0jKwNUE0ur0FLeRJLMPb5RgxBnggr21sQjihG+ZxnHC+L3NQOzGYs/BOB/kn06JH9L7Dq3i6RqAUCbIKszjbg10Tc5I77OugcHwhmemAS67RpvBXDgxoVgKdfzNaFCmwptRlxsY=
-    - secure: hFLq2YDn5nwReR11x/hiO9rJvVNcplUbEpyrTpVRn1jcCsM9uxau/eskapObkpDSCLdr5EiTI0gin5FIO7iqQA5yP+MgFkk4P0eM2msy42vg8nq6ZtbIq/qj9fKOiZiLJyBM5Ybytk9N9CAKccS+pmk0kg/YpIQR5OGxZoUd0dY=
+    - secure: L22k89oDjcsXggQUCNCHQPpVcRDybi/kiNJpjBMV+NbL/aZeCNBocbcaXe9XF9OhyJBiTwxpubo4DwjaidXVf14hHBppcuwrn+QBc2I7cOD5+oFf8IkemdXC9sCuich8fyL5+zBBEknh1MpiiBw5v5cW8qs9ok+N/oM85sEK3A4=
+    - secure: V0Gv+NTYR0ODMUWW9/Fb8ZJC4aTo1pqsD7kxobp51kbe7p+Vn9Ntkt75GBXaw+3fJhU1Xp2029+/rvMTWv5GweJ3eMt2fEN2nwHPwm7MRabhFllzVvet5hXfLXZw+ZsLuWWXhDjEUXCESW2br3UeMDUPdxHTt/NCBEgIEWMmiR8=
   matrix:
     - "BROWSER='firefox::Linux'"
     - "BROWSER='firefox::OS X 10.6'"
