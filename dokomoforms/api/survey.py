@@ -6,7 +6,8 @@ from sqlalchemy.engine import RowProxy, Connection
 
 from dokomoforms.api import execute_with_exceptions, json_response
 from dokomoforms.db import delete_record, update_record, survey_table
-from dokomoforms.db.answer import get_answers_for_question, answer_insert
+from dokomoforms.db.answer import get_answers_for_question, answer_insert, \
+    _get_is_other
 from dokomoforms.db.answer_choice import get_answer_choices_for_choice_id, \
     answer_choice_insert
 from dokomoforms.db.auth_user import get_auth_user_by_email
@@ -100,13 +101,14 @@ def _create_choices(connection: Connection,
                                               choices)
 
     for number, choice in enumerate(new_choices):
-        choice_dict = {'question_id': question_id,
-                       'survey_id': values['survey_id'],
-                       'choice': choice,
-                       'choice_number': number,
-                       'type_constraint_name': values['type_constraint_name'],
-                       'question_sequence_number': values['sequence_number'],
-                       'allow_multiple': values['allow_multiple']}
+        choice_dict = {
+            'question_id': question_id,
+            'survey_id': values['survey_id'],
+            'choice': choice,
+            'choice_number': number,
+            'type_constraint_name': values['type_constraint_name'],
+            'question_sequence_number': values['sequence_number'],
+            'allow_multiple': values['allow_multiple']}
         executable = question_choice_insert(**choice_dict)
         exc = [('unique_choice_names', RepeatedChoiceError(choice))]
         result = execute_with_exceptions(connection, executable, exc)
@@ -125,6 +127,8 @@ def _create_choices(connection: Connection,
                 new_submission_id = submission_map[answer.submission_id]
                 answer_values['question_choice_id'] = question_choice_id
                 answer_values['submission_id'] = new_submission_id
+                answer_metadata = answer.answer_choice_metadata
+                answer_values['answer_choice_metadata'] = answer_metadata
                 connection.execute(answer_choice_insert(**answer_values))
 
         yield question_choice_id
@@ -181,15 +185,15 @@ def _create_questions(connection: Connection,
                 if new_tcn != old_tcn:
                     continue
                 answer_values = question_fields.copy()
+                answer_values['answer_metadata'] = answer.answer_metadata
                 new_submission_id = submission_map[answer.submission_id]
 
-                if answer.answer_text is None:
-                    answer_values['answer'] = answer['answer_' + new_tcn]
-                    answer_values['is_other'] = False
-                else:
+                is_other = _get_is_other(answer)
+                answer_values['is_other'] = is_other
+                if is_other:
                     answer_values['answer'] = answer.answer_text
-                    is_other = False if new_tcn == 'text' else True
-                    answer_values['is_other'] = is_other
+                else:
+                    answer_values['answer'] = answer['answer_' + new_tcn]
                 with_other = values['logic']['with_other']
 
                 if new_tcn == 'multiple_choice' and not with_other:
@@ -398,7 +402,7 @@ def _to_json(connection: Connection, survey: RowProxy) -> dict:
     return {'survey_id': survey.survey_id,
             'survey_title': survey.survey_title,
             'survey_version': survey.survey_version,
-            'metadata': survey.metadata,
+            'survey_metadata': survey.survey_metadata,
             'questions': q_fields,
             'created_on': survey.created_on.isoformat()}
 

@@ -32,8 +32,24 @@ def _sanitize_answer(answer, type_constraint_name: str) -> str:
     return answer
 
 
+# TODO: Create an abstraction over answer and answer_choice
+def _get_is_other(answer: RowProxy) -> bool:
+    """
+    Return whether this answer object contains an "other" answer (text for a
+    non-text question).
+
+    :param answer: a record in the answer or answer_choice table
+    :return: whether this is an "other" answer
+    """
+    try:
+        return answer.is_other
+    except AttributeError:
+        return False
+
+
 def answer_insert(*,
                   answer,
+                  answer_metadata: dict,
                   question_id: str,
                   submission_id: str,
                   type_constraint_name: str,
@@ -52,6 +68,7 @@ def answer_insert(*,
                    date,
                    time,
                    location (given as [LON, LAT])
+    :param answer_metadata: metadata associated with the answer
     :param question_id: The UUID of the question.
     :param submission_id: The UUID of the submission.
     :param type_constraint_name: the type constraint
@@ -62,20 +79,26 @@ def answer_insert(*,
     :return: The Insert object. Execute this!
     """
     tcn = type_constraint_name
+    if answer_metadata is None:
+        answer_metadata = {}
 
     values = {'question_id': question_id,
+              'answer_metadata': answer_metadata,
+              'is_other': is_other,
               'submission_id': submission_id,
               'type_constraint_name': tcn,
               'sequence_number': sequence_number,
               'allow_multiple': allow_multiple,
               'survey_id': survey_id}
 
-    if type_constraint_name == 'facility':
-        values['answer_text'] = answer['id']
-        values['answer_location'] = _sanitize_answer(answer, 'location')
+    if is_other:
+        values['answer_text'] = answer
     else:
-        answer_type = 'answer_text' if is_other else 'answer_' + tcn
-        values[answer_type] = _sanitize_answer(answer, tcn)
+        if type_constraint_name == 'facility':
+            values['answer_text'] = answer['id']
+            values['answer_location'] = _sanitize_answer(answer, 'location')
+        else:
+            values['answer_' + tcn] = _sanitize_answer(answer, tcn)
 
     return answer_table.insert().values(values)
 

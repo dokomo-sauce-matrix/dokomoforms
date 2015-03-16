@@ -50,7 +50,7 @@ def _jsonify(connection: Connection,
     """
     type_constraint_name = question_select(connection,
                                            question_id).type_constraint_name
-    if type_constraint_name == 'location':
+    if type_constraint_name in {'location', 'facility'}:
         geo_json = connection.execute(func.ST_AsGeoJSON(answer)).scalar()
         return json_decode(geo_json)['coordinates']
     elif type_constraint_name in {'date', 'time'}:
@@ -118,6 +118,8 @@ def _get_type_constraint_name(allowable_types: set, question: RowProxy) -> str:
     tcn = question.type_constraint_name
     if tcn not in allowable_types:
         raise InvalidTypeForAggregationError(tcn)
+    if tcn == 'facility':
+        tcn = 'location'
     return tcn
 
 
@@ -164,18 +166,22 @@ def _scalar(connection: Connection,
 
     question = question_select(connection, question_id)
 
-    tcn = _get_type_constraint_name(allowable_types, question)
-    if is_other:
-        tcn = 'text'
+    conds = [question_table.c.question_id == question_id,
+             survey_table.c.auth_user_id == user_id]
 
-    original_table, column_name = _table_and_column(tcn)
+    if is_other:
+        original_table = answer_table
+        column_name = 'answer_text'
+    else:
+        tcn = _get_type_constraint_name(allowable_types, question)
+        original_table, column_name = _table_and_column(tcn)
+
     table = original_table.join(
         question_table,
         original_table.c.question_id == question_table.c.question_id
     ).join(survey_table)
-
-    conds = [question_table.c.question_id == question_id,
-             survey_table.c.auth_user_id == user_id]
+    if is_other:
+        conds.append(original_table.c.is_other)
 
     column = get_column(original_table, column_name)
 
@@ -278,7 +284,7 @@ def count(connection: Connection,
     :return: a JSON dict containing the result
     """
     types = {'text', 'integer', 'decimal', 'multiple_choice', 'date', 'time',
-             'location'}
+             'location', 'facility'}
     regular = _scalar(connection, question_id, sqlcount,
                       auth_user_id=auth_user_id,
                       email=email, allowable_types=types)
@@ -434,7 +440,7 @@ def bar_graph(connection: Connection,
     user_id = _get_user_id(connection, auth_user_id, email)
 
     allowable_types = {'text', 'integer', 'decimal', 'multiple_choice', 'date',
-                       'time', 'location'}
+                       'time', 'location', 'facility'}
 
     question = question_select(connection, question_id)
 
