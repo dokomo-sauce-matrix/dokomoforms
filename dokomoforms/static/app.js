@@ -1,5 +1,9 @@
 var NEXT = 1;
 var PREV = -1;
+var ON = 1;
+var OFF = 0;
+var NUM_FAC = 256;
+var FAC_RAD = 2; //in KM
 
 var App = {
     unsynced: [], // unsynced surveys
@@ -20,11 +24,10 @@ App.init = function(survey) {
     if (App.facilities.length === 0) {
         // See if you can get some facilities
         getNearbyFacilities(App.start_loc.lat, App.start_loc.lon, 
-                5, // Radius in km 
-                100, // limit
-                "facilities", // id for localStorage
-                null// what to do with facilities
-            );
+            FAC_RAD, // Radius in km 
+            NUM_FAC, // limit
+            null// what to do with facilities
+        );
     }
 
     // Load up any unsynced facilities
@@ -177,7 +180,7 @@ Survey.prototype.getFirstResponse = function(question) {
         if (answer) {
             var val = Widgets._validate(question.type_constraint_name, answer.response);
             if ( val !== null) {
-             return val;
+                return val;
             }
         }
     }
@@ -206,6 +209,12 @@ Survey.prototype.next = function(offset) {
     if (offset === NEXT) {
         if (this.current_question.logic.required && (first_response === null)) {
             App.message('Survey requires this question to be completed.');
+            return;
+        }
+
+        var other_response = this.current_question.answer && this.current_question.answer[0]; // I know its position always
+        if (other_response && other_response.is_other && !other_response.response) {
+            App.message('Please provide a reason before moving on.');
             return;
         }
 
@@ -344,7 +353,7 @@ Survey.prototype.submit = function() {
         answers: survey_answers
     };
 
-    //console.log('submission:', data);
+    console.log('submission:', data);
 
     sync.classList.add('icon--spin');
     save_btn.classList.add('icon--spin');
@@ -408,23 +417,42 @@ var Widgets = {
 // All widgets store results in the questions.answer array
 Widgets._input = function(question, page, type) {
     var self = this;
+    self.state = OFF;
+    //console.log("Initial question ans array", question.answer);
     
     // Render add/minus input buttons 
     Widgets._renderRepeat(page, question);
-    
-    // Clean up answer array
+
+    //Render don't know
+    Widgets._renderOther(page, question, self);
+
+    // Clean up answer array, short circuits on is_other responses
     question.answer = []; //XXX: Must be reinit'd to prevent sparse array problems
     $(page).find('input').each(function(i, child) { 
-        question.answer[i] = {
-            response: self._validate(type, child.value),
-            is_other: false
+        if ((child.className.indexOf('other_input') > - 1) && child.value !== "") {
+            // if don't know input field has a response, break 
+            question.answer = [{
+                response: self._validate('text', child.value),
+                is_other: true
+            }];
+
+            return false;
         }
 
+        if ((child.className.indexOf('other_input') === -1) && child.value !== "") {
+            // Ignore other responses if they don't short circut the loop above
+            question.answer[i] = {
+                response: self._validate(type, child.value),
+                is_other: false
+            }
+        }
     });
 
+    //console.log('Restored question ans array', question.answer);
+    
     // Set up input event listner
     $(page)
-        .find('input')
+        .find('.text_input').not('.other_input')
         .change(function() { //XXX: Change isn't sensitive enough on safari?
             var ans_ind = $(page).find('input').index(this); 
             question.answer[ans_ind] = { 
@@ -438,7 +466,7 @@ Widgets._input = function(question, page, type) {
     $(page)
         .find('.question__add')
         .click(function() { 
-            self._addNewInput(page, $(page).find('input').last(), question);
+            self._addNewInput(page, $(page).find('input').not('.other_input').last(), question);
 
         });
 
@@ -446,8 +474,27 @@ Widgets._input = function(question, page, type) {
     $(page)
         .find('.question__minus')
         .click(function() { 
-            self._removeNewestInput($(page).find('input'), question);
+            self._removeNewestInput($(page).find('input').not('.other_input'), question);
 
+        });
+    
+    // Click the other button when you don't know answer
+    $(page)
+        .find('.question__btn__other')
+        .click(function() { 
+            self.state = (self.state + 1) % 2 // toggle btwn 1 and 0
+            self._toggleOther(page, question, self.state);
+        });
+
+
+    // Set up other input event listener
+    $(page)
+        .find('.other_input')
+        .change(function() { //XXX: Change isn't sensitive enough on safari?
+            question.answer = [{ 
+                response: self._validate('text', this.value),
+                is_other: true
+            }];
         });
 };
 
@@ -475,6 +522,74 @@ Widgets._removeNewestInput = function(inputs, question) {
         .focus()
 };
 
+// Render 'don't know' section if question has with_other logic
+// Display response and alter widget state if first response is other
+Widgets._renderOther = function(page, question, input) {
+    var self = this;
+    // Render don't know feature 
+    if (question.logic.with_other) {
+        var repeatHTML = $('#template_other').html();
+        var widgetTemplate = _.template(repeatHTML);
+        var compiledHTML = widgetTemplate({question: question});
+        $(page).append(compiledHTML);
+
+        var other_response = question.answer && question.answer[0] && question.answer[0].is_other;
+        if (other_response) {
+            // Disable main input
+            this._toggleOther(page, question, ON);
+            input.state = ON;
+        }
+    }
+}
+
+// Toggle the 'don't know' section based on passed in state value on given page
+// Alters question.answer array
+Widgets._toggleOther = function(page, question, state) {
+    var self = this;
+    question.answer = [];
+    
+    if (state == ON) {
+        // Disable inputs
+        $(page).find('.text_input').not('.other_input').each(function(i, child) { 
+                $(child).attr('disabled', true);
+        });
+        
+        $(page).find('.question__other').show();
+        
+        $(page).find('.other_input').each(function(i, child) { 
+            // Doesn't matter if response is there or not
+            question.answer[0] = {
+                response: self._validate('text', child.value),
+                is_other: true
+            }
+        });
+
+
+        $('.question__btn__other')[0].classList.add('question__btn__active');
+
+    } else if (state === OFF) { 
+    
+        // Or hide other
+        $(page).find('.text_input').not('.other_input').each(function(i, child) { 
+              $(child).attr('disabled', false);
+        });
+        
+        $(page).find('.question__other').hide();
+        
+        $(page).find('.text_input').not('.other_input').each(function(i, child) { 
+            if (child.value !== "") { 
+                question.answer[i] = {
+                    response: self._validate(question.type_constraint_name, child.value),
+                    is_other: false
+                }
+            }
+        });
+        
+        $('.question__btn__other')[0].classList.remove('question__btn__active');
+    }
+}
+
+// Render +/- buttons on given page
 Widgets._renderRepeat = function(page, question) {
     // Render add/minus input buttons 
     if (question.allow_multiple) {
@@ -641,6 +756,8 @@ Widgets._getMap = function() {
             center: [App.start_loc.lat, App.start_loc.lon],
             dragging: true,
             zoom: 13,
+            minZoom: 13,
+            maxZoom: 14,
             zoomControl: false,
             doubleClickZoom: false,
             attributionControl: false
@@ -672,7 +789,7 @@ Widgets._getMap = function() {
     Widgets.interval = window.setInterval(updateColour, 50); // XXX: could be CSS
 
     map.addLayer(App._getMapLayer());
-
+    map.setMaxBounds(map.getBounds().pad(1));
     return map;
 };
 
@@ -695,12 +812,19 @@ Widgets.location = function(question, page) {
     // Clean up answer array
     question.answer = []; //XXX: Must be reinit'd to prevent sparse array problems
     $(page).find('.question__location').each(function(i, child) { 
+        var lon = $(child).find('.question__lon').val();
+        var lat = $(child).find('.question__lat').val();
+
+        if (!lat || !lon) {
+            return false;
+        }
+
         question.answer[i] = { 
             response: { 
-                'lon': $(child).find('.question__lon').val(),
-                'lat': $(child).find('.question__lat').val()
+                'lon': lon,
+                'lat': lat
             },
-            is_other: false
+            is_other: false //XXX Check if child contains other_input
         };
     });
 
@@ -724,6 +848,7 @@ Widgets.location = function(question, page) {
         .click(function() {
             var sync = $('.nav__sync')[0];
             sync.classList.add('icon--spin');
+            App.message('Searching ...');
             navigator.geolocation.getCurrentPosition(
                 function success(position) {
                     sync.classList.remove('icon--spin');
@@ -735,16 +860,17 @@ Widgets.location = function(question, page) {
                     ];
 
                     // Set map view and update indicator position
+                    map.setMaxBounds(null);
                     map.setView([coords[1], coords[0]]);
-                    map.circle
-                        .setLatLng([coords[1], coords[0]]);
+                    map.circle.setLatLng([coords[1], coords[0]]);
+                    map.setMaxBounds(map.getBounds().pad(1));
 
                     updateLocation(coords);
 
                 }, function error() {
                     //TODO: If cannot Get location" for some reason, 
                     sync.classList.remove('icon--spin');
-                    alert('error'); //XXX Replace with our message thing
+                    App.message('Could not get your location, please make sure your GPS device is active.');
                 }, {
                     enableHighAccuracy: true,
                     timeout: 20000,
@@ -782,6 +908,9 @@ Widgets.facility = function(question, page) {
         map.circle.setLatLng(map.getCenter());
     });
 
+    $(page).find('.facility__name').attr('disabled', true);
+    $(page).find('.facility__type').attr('disabled', true);
+
     // Know which marker is currently "up" 
     var touchedMarker = null;
     // Added facility  
@@ -794,20 +923,22 @@ Widgets.facility = function(question, page) {
     new_facilities_group.addTo(map);
 
     // Revisit API Call calls facilitiesCallback
-    if (navigator.onLine) {
-        // Refresh if possible
-        getNearbyFacilities(App.start_loc.lat, App.start_loc.lon, 
-                5, // Radius in km 
-                100, // limit
-                "facilities", // id for localStorage
-                drawFacilities // what to do with facilities
-            );
-
-    } else {
-        drawFacilities(App.facilities); // Otherwise draw our synced facilities
-    }
+    reloadFacilities(App.start_loc.lat, App.start_loc.lon);
 
     /* Helper functions for updates  */
+    function reloadFacilities(lat, lon) {
+        if (navigator.onLine) {
+            // Refresh if possible
+            getNearbyFacilities(lat, lon, 
+                    FAC_RAD, // Radius in km 
+                    NUM_FAC, // limit
+                    drawFacilities // what to do with facilities
+                );
+
+        } else {
+            drawFacilities(App.facilities); // Otherwise draw our synced facilities
+        }
+    }
 
     // handles calling drawPoint gets called once per getNearby call 
     function drawFacilities(facilities) {
@@ -819,20 +950,23 @@ Widgets.facility = function(question, page) {
         facilities = facilities || [];
         for (var i = 0; i < facilities.length; i++) {
             var facility = facilities[i];
-            var marker = drawPoint(facility.coordinates[1], 
-                        facility.coordinates[0], 
-                        facility.name, 
-                        facility.properties.sector,
-                        facility.uuid,
-                        onFacilityClick);
 
-            // If selected uuid was from Revisit, paint it white
-            if (selected === marker.uuid) {
-                selectFacility(marker);
-                //console/g.log("match", selected);
-            }
+            //if ((facility.coordinates[1] < top_y && facility.coordinates[1] > bot_y)
+            //&& (facility.coordinates[0] < top_x && facility.coordinates[0] > bot_x)) {
+                var marker = drawPoint(facility.coordinates[1], 
+                            facility.coordinates[0], 
+                            facility.name, 
+                            facility.properties.sector,
+                            facility.uuid,
+                            onFacilityClick);
 
-            facilities_group.addLayer(marker);
+                // If selected uuid was from Revisit, paint it white
+                if (selected === marker.uuid) {
+                    selectFacility(marker);
+                }
+
+                facilities_group.addLayer(marker);
+            //}
         }
 
         // UNSYNCED FACILITIES
@@ -865,10 +999,15 @@ Widgets.facility = function(question, page) {
 
     function selectFacility(marker) {
         marker.setZIndexOffset(666); // above 250 so it can't be hidden by hovering over neighbour
+        $(page).find('.facility__name').attr('disabled', true);
+        $(page).find('.facility__type').attr('disabled', true);
+
         marker.setIcon(icon_selected);
         if (marker.is_new) { 
             marker.setIcon(icon_added);
             addedMarker = marker;
+            $(page).find('.facility__name').attr('disabled', false);
+            $(page).find('.facility__type').attr('disabled', false);
         }
 
         touchedMarker = marker;
@@ -884,6 +1023,7 @@ Widgets.facility = function(question, page) {
                 'facility_sector': marker.sector
             } 
         }
+
         $(page).find('.facility__name').val(marker.name);
         $(page).find('.facility__type').val(marker.sector);
     }
@@ -946,31 +1086,25 @@ Widgets.facility = function(question, page) {
         .click(function() {
             var sync = $('.nav__sync')[0];
             sync.classList.add('icon--spin');
+            App.message('Searching ...');
             navigator.geolocation.getCurrentPosition(
                 function success(position) {
                     // Server accepts [lon, lat]
                     var coords = [position.coords.longitude, position.coords.latitude];
 
                     // Update map position and set indicator position again
+                    map.setMaxBounds(null);
                     map.setView([coords[1], coords[0]]);
-                    map.circle
-                        .setLatLng([coords[1], coords[0]]);
+                    map.circle.setLatLng([coords[1], coords[0]]);
+                    map.setMaxBounds(map.getBounds().pad(1));
 
                     // Revisit api call
-                    if (navigator.onLine) {
-                        // refresh if possible
-                        getNearbyFacilities(coords[1], coords[0],
-                                5, // Radius in km 
-                                100, // limit
-                                "facilities", // id for localStorage
-                                drawFacilities// what to do with facilities
-                        );
-                    }
+                    reloadFacilities(coords[1], coords[0]); 
 
                     sync.classList.remove('icon--spin');
                 }, function error() {
                     sync.classList.remove('icon--spin');
-                    alert('error'); ///XXX: DONT FORGET MEMEE
+                    App.message('Could not get your location, please make sure your GPS device is active.');
                 }, {
                     enableHighAccuracy: true,
                     timeout: 20000,
@@ -994,6 +1128,9 @@ Widgets.facility = function(question, page) {
                 }
 
                 $(page).find('.facility__btn').text("Add New Site");
+                $(page).find('.facility__name').attr('disabled', true);
+                $(page).find('.facility__type').attr('disabled', true);
+
                 addedMarker = null;
                 question._new_facility = null;
                 return;
@@ -1014,6 +1151,8 @@ Widgets.facility = function(question, page) {
             // Get and place marker
             addedMarker = addFacility(lat, lng, uuid);
             $(page).find('.facility__btn').html("Remove New Site");
+            $(page).find('.facility__name').attr('disabled', false);
+            $(page).find('.facility__type').attr('disabled', false);
             question._new_facility = uuid; // state to prevent multiple facilities
 
         });
@@ -1051,7 +1190,7 @@ Widgets.facility = function(question, page) {
 
 
 /* -------------------------- Revisit Stuff Below ----------------------------*/
-function getNearbyFacilities(lat, lng, rad, lim, id, cb) {
+function getNearbyFacilities(lat, lng, rad, lim, cb) {
     var url = "http://staging.revisit.global/api/v0/facilities.json"; 
 
     // Revisit ajax req
@@ -1064,10 +1203,10 @@ function getNearbyFacilities(lat, lng, rad, lim, id, cb) {
             fields: "name,uuid,coordinates,properties:sector", //filters results to include just those three fields,
         },
         function(data) {
-            localStorage.setItem(id, JSON.stringify(data.facilities));
+            localStorage.setItem("facilities", JSON.stringify(data.facilities));
             if (cb) {
                 App.facilities = data.facilities;
-                cb(data.facilities);
+                cb(data.facilities); //drawFacillities callback probs
             }
         }
     );
