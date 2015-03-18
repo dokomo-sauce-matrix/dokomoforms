@@ -261,6 +261,7 @@ class TypeTest(DriverTest):
         tcn = type_constraint_name
         survey_json = {'email': 'test_email',
                        'survey_title': 'test_question_type_' + tcn,
+                       'survey_metadata': {},
                        'questions': [{'question_title': tcn,
                                       'type_constraint_name': tcn,
                                       'allow_multiple': allow_multiple,
@@ -600,7 +601,7 @@ class LocationTest(TypeTest):
                           self.drv.find_element_by_id,
                           'line_graph')
 
-        WebDriverWait(self.drv, 5).until(
+        WebDriverWait(self.drv, 10).until(
             EC.presence_of_element_located((By.ID, 'bar_graph')))
         bar_graph = self.drv.find_element_by_id('bar_graph')
         self.assertTrue(bar_graph.is_displayed())
