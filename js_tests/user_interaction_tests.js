@@ -381,7 +381,7 @@ describe('User facility questions', function(done) {
 
             //XXX Fix, event not happening
             $('.leaflet-marker-icon').first().click();
-            //console.log($('.facility__name').val());
+            console.log($('.facility__name').val());
             //$('.leaflet-marker-icon').first().click();
             //console.log($('.facility__name').val());
             

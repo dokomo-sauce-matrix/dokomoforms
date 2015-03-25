@@ -9,9 +9,9 @@ var App = {
     unsynced: [], // unsynced surveys
     facilities: [], // revisit facilities
     unsynced_facilities: {}, // new facilities
-    start_loc: {'lat': 40.8138912, 'lon': -73.9624327}, 
+    start_loc: {'lat': 40.8138912, 'lon': -73.9624327}, // defaults to nyc, updated constantly
+    tile_url: 'http://{s}.tiles.mapbox.com/v3/examples.map-20v6611k/{z}/{x}/{y}.png',
     submitter_name: ''
-   // defaults to nyc, updated by metadata and answers to location questions
 };
 
 App.init = function(survey) {
@@ -21,12 +21,13 @@ App.init = function(survey) {
     self.facilities = JSON.parse(localStorage.facilities || "[]");
     self.submitter_name = localStorage.name;
 
+    // Load any facilities
     if (App.facilities.length === 0) {
-        // See if you can get some facilities
+        // See if you can get some new facilities
         getNearbyFacilities(App.start_loc.lat, App.start_loc.lon, 
             FAC_RAD, // Radius in km 
             NUM_FAC, // limit
-            null// what to do with facilities
+            null// what to do with facilities 
         );
     }
 
@@ -70,53 +71,6 @@ App.message = function(text) {
         .fadeOut('fast');
 };
 
-// Handle caching map layer
-App._getMapLayer = function() {
-    //XXX: TODO: Some how cache this on survey load 
-    function getImage(url, cb) {
-        // Retrieves an image from cache, possibly fetching it first
-        var imgKey = url.split('.').slice(1).join('.').replace(/\//g, '');
-        var img = localStorage[imgKey];
-        if (img) {
-            cb(img);
-        } else {
-            imgToBase64(url, 'image/png', function(img) {
-                localStorage[imgKey] = img;
-                cb(img);
-            });
-        }
-    }
-    
-    function imgToBase64(url, outputFormat, callback){
-        var canvas = document.createElement('canvas'),
-            ctx = canvas.getContext('2d'),
-            img = new Image();
-        img.crossOrigin = 'Anonymous';
-        img.onload = function(){
-            var dataURL;
-            canvas.height = img.height;
-            canvas.width = img.width;
-            ctx.drawImage(img, 0, 0);
-            dataURL = canvas.toDataURL(outputFormat);
-            callback.call(this, dataURL);
-            canvas = null; 
-        };
-        img.src = url;
-    }
-
-    // Tile layer
-    return new L.TileLayer.Functional(function(view) {
-        var deferred = $.Deferred();
-        var url = 'http://{s}.tiles.mapbox.com/v3/examples.map-20v6611k/{z}/{y}/{x}.png'
-            .replace('{s}', 'abcd'[Math.round(Math.random() * 3)])
-            .replace('{z}', Math.floor(view.zoom))
-            .replace('{x}', view.tile.row)
-            .replace('{y}', view.tile.column);
-        getImage(url, deferred.resolve);
-        return deferred.promise();
-    });
-
-};
 
 function Survey(id, version, questions, metadata) {
     var self = this;
@@ -772,17 +726,31 @@ Widgets.multiple_choice = function(question, page) {
 };
 
 Widgets._getMap = function() {
+
     var map = L.map('map', {
             center: [App.start_loc.lat, App.start_loc.lon],
             dragging: true,
-            zoom: 13,
-            minZoom: 13,
-            maxZoom: 14,
+            maxZoom: 18,
+            minZoom: 11,
+            zoom: 14,
             zoomControl: false,
             doubleClickZoom: false,
             attributionControl: false
         });
     
+    var tile_layer =  new L.tileLayer(App.tile_url, {
+        maxZoom: 18,
+        useCache: true
+    });
+
+    tile_layer.on('tilecachehit',function(ev){
+        //console.log('Cache hit: ', ev.url);
+    });
+
+    tile_layer.on('tilecachemiss',function(ev){
+        //console.log('Cache miss: ', ev.url);
+    });
+
     // Blinking location indicator
     var circle = L.circle(App.start_loc, 5, {
             color: 'red',
@@ -808,8 +776,7 @@ Widgets._getMap = function() {
     // Save the interval id, clear it every time a page is rendered
     Widgets.interval = window.setInterval(updateColour, 50); // XXX: could be CSS
     
-    map.addLayer(App._getMapLayer());
-    //map.setMaxBounds(map.getBounds().pad(1));
+    map.addLayer(tile_layer);
     return map;
 };
 
