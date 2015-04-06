@@ -148,8 +148,12 @@ class SubmissionTest(DriverTest):
         self.drv.get(base + '/view')
 
         # Click on the survey
+        WebDriverWait(self.drv, 5).until(EC.presence_of_element_located(
+            (By.XPATH,
+             '/html/body/div[2]/div/div/div/table/tbody/tr[1]/td[1]/a')))
         self.drv.find_element_by_xpath(
-            '/html/body/div[2]/div/div/ul/li/a[1]').click()
+            '/html/body/div[2]/div/div/div/table/tbody/tr[1]/td[1]/a'
+        ).click()
 
         # Click on the shareable link
         WebDriverWait(self.drv, 4).until(EC.presence_of_element_located(
@@ -238,12 +242,18 @@ class SubmissionTest(DriverTest):
 
         # Check the submissions
         self.drv.get(base + '/view')
-        WebDriverWait(self.drv, 3).until(EC.presence_of_element_located(
-            (By.XPATH, '/html/body/div[2]/div/div/ul/li/a[1]')))
+        WebDriverWait(self.drv, 5).until(EC.presence_of_element_located(
+            (By.XPATH,
+             '/html/body/div[2]/div/div/div/table/tbody/tr[1]/td[1]/a')))
         self.drv.find_element_by_xpath(
-            '/html/body/div[2]/div/div/ul/li/a[1]').click()
+            '/html/body/div[2]/div/div/div/table/tbody/tr[1]/td[1]/a'
+        ).click()
+        WebDriverWait(self.drv, 5).until(EC.presence_of_element_located(
+            (By.XPATH,
+             '/html/body/div[2]/div/div/div/table/tbody/tr[1]/td[1]/a')
+        ))
         submission_link = self.drv.find_element_by_xpath(
-            '/html/body/div[2]/div/div/ul[2]/li/a')
+            '/html/body/div[2]/div/div/div/table/tbody/tr[1]/td[1]/a')
         self.drv.execute_script(
             'window.scrollTo(0, {});'.format(submission_link.location['y']))
         submission_link.click()
@@ -558,13 +568,6 @@ class MultiSelectTest(TypeTest):
                choices[2].selected = true;
             ''')
             self.drv.execute_script("$('select').change()")
-        # elif self.browser_name == 'internet explorer':
-        #     # No idea why the ActionChains approach doesn't work...
-        #     self.drv.execute_script('''
-        #         var choices = $('option');
-        #         choices[1].selected = true;
-        #         choices[2].selected = true;
-        #      ''')
         else:
             is_osx = self.platform.startswith('OS X')
             ctrl_key = Keys.COMMAND if is_osx else Keys.CONTROL
@@ -595,8 +598,11 @@ class MultiSelectTest(TypeTest):
 
         # Get the submission page
         self.drv.get(base + '/view/' + survey_id)
+        WebDriverWait(self.drv, 5).until(EC.presence_of_element_located(
+            (By.XPATH,
+             '/html/body/div[2]/div/div/div/table/tbody/tr[1]/td[1]/a')))
         submission_link = self.drv.find_element_by_xpath(
-            '/html/body/div[2]/div/div/ul[2]/li/a')
+            '/html/body/div[2]/div/div/div/table/tbody/tr[1]/td[1]/a')
         self.drv.execute_script(
             'window.scrollTo(0, {});'.format(submission_link.location['y']))
         submission_link.click()
