@@ -4,8 +4,8 @@ python:
 sudo: false
 env:
   global:
-    - secure: IrFp6lAB4leV7IOlnpaW2C4QVPFg9oHJFyXQQy0rhSkM118ezGNyMCCDOM2IvlIEtwn6vtfqZIgWwZzqW8mXl+uWmYe7u50lBWkOBwR5NdVKF/PBfXi/82iJ36PaInE0kMlY+6vKUJVNIftnfKs0J9uFIQoWPxFYVXahk6FkM2Q=
-    - secure: YNjBjniFtaGMPI2pQXUQEvrvOE0QWJmadljvmjZxE2A1aIPNwFGp/3KVl7cn+KRJadCqAuzRiFB4ZyFY1qbqkkx0vSG4FBqTDZAHwhGThxMkiYqx6dyo+GTDcy+MYPzdzMUv12vQ1juGdn89+4h0rke1tepLFMKyXW0Y3qi/IN4=
+    - secure: L22k89oDjcsXggQUCNCHQPpVcRDybi/kiNJpjBMV+NbL/aZeCNBocbcaXe9XF9OhyJBiTwxpubo4DwjaidXVf14hHBppcuwrn+QBc2I7cOD5+oFf8IkemdXC9sCuich8fyL5+zBBEknh1MpiiBw5v5cW8qs9ok+N/oM85sEK3A4=
+    - secure: V0Gv+NTYR0ODMUWW9/Fb8ZJC4aTo1pqsD7kxobp51kbe7p+Vn9Ntkt75GBXaw+3fJhU1Xp2029+/rvMTWv5GweJ3eMt2fEN2nwHPwm7MRabhFllzVvet5hXfLXZw+ZsLuWWXhDjEUXCESW2br3UeMDUPdxHTt/NCBEgIEWMmiR8=
   matrix:
     - "BROWSER='firefox::Linux'"
     - "BROWSER='firefox::OS X 10.6'"
@@ -61,10 +61,6 @@ before_script:
   - echo 'APP_DEBUG=True' > dokomoforms/local_settings.py
   - echo 'SAUCE_CONNECT=True' >> dokomoforms/local_settings.py
   - python3 webapp.py &
-
-before_install:
-  - export DISPLAY=:99.0
-  - sh -e /etc/init.d/xvfb start
 
 # command to run tests
 script: 
