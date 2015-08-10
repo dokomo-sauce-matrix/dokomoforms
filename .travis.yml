@@ -1,6 +1,7 @@
 language: python
 python:
   - "3.4"
+cache: pip
 env:
   global:
     - SAUCE_CONNECT=true
@@ -48,11 +49,13 @@ addons:
   sauce_connect: true
 
 install:
-  - pip install tox
+  - pip install -r requirements.txt
+  - pip install selenium
 
 before_script:
   - psql -c 'create database doko;' -U postgres
   - head -c 24 /dev/urandom > cookie_secret
+  - ./webapp.py --port=9999 --debug=True --https=False --persona_verification_url=http://localhost:9999/debug/persona_verify &
 
 script:
-  - tox tests.test_selenium
+  - python -m unittest tests.test_selenium
