@@ -59,4 +59,4 @@ before_script:
   - head -c 24 /dev/urandom > cookie_secret
 
 script:
-  - xvfb-run tox tests.test_selenium
+  - tox tests.test_selenium
