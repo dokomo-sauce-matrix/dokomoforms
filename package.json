@@ -1,41 +1,52 @@
 {
   "name": "dokomoforms",
   "version": "1.0.0",
-  "description": "Forms, everywhere",
-  "main": "static/app.js",
+  "description": "Frontend dependencies for Dokomoforms",
+  "main": "dokomoforms/static/bundle.js",
   "directories": {
     "doc": "docs",
     "test": "tests"
   },
+  "dependencies": {
+    "jquery": "^2.1.4",
+    "lz-string": "^1.4.4",
+    "mpromise": "^0.5.5",
+    "node-uuid": "^1.4.3",
+    "pouchdb": "^3.6.0",
+    "pouchdb-upsert": "^1.1.1",
+    "react": "^0.13.3"
+  },
+  "devDependencies": {
+    "mocha": "^2.2.4",
+    "coveralls": "^2.11.2",
+    "istanbul": "^0.3.13",
+    "mocha-istanbul": "^0.2.0",
+    "jsdom": "^5.1.0",
+    "jshint": "^2.7.0",
+    "reactify": "^1.1.1",
+    "should": "^6.0.1",
+    "supertest": "^0.15.0",
+    "browserify": "^10.2.3"
+  },
   "scripts": {
-    "test": "node_modules/.bin/mocha js_tests",
-    "posttest": "./node_modules/.bin/istanbul cover --report lcovonly --dir ./reports  ./node_modules/.bin/_mocha -- -R spec js_tests/ && cat reports/lcov.info | ./node_modules/coveralls/bin/coveralls.js"
+    "test": "mocha"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/SEL-Columbia/dokomoforms.git"
+    "url": "git+https://github.com/SEL-Columbia/dokomoforms.git"
   },
   "keywords": [
-    "dokomoforms",
-    "forms",
-    "formhub",
-    "frontend",
-    "testing"
+    "Dokomoforms",
+    "React",
+    "Browserify",
+    "Survey",
+    "Data",
+    "Collection"
   ],
-  "author": "Abdi Dahir, Viktor Roytman, Chris Tan",
-  "license": "GPL",
+  "author": "Abdi Dahir Viktor Roytman Jon Wohl",
+  "license": "ISC",
   "bugs": {
     "url": "https://github.com/SEL-Columbia/dokomoforms/issues"
   },
-  "homepage": "https://github.com/SEL-Columbia/dokomoforms",
-  "devDependencies": {
-    "coveralls": "^2.11.2",
-    "istanbul": "^0.3.13",
-    "jsdom": "^5.3.0",
-    "jshint": "^2.7.0",
-    "mocha": "^2.2.4",
-    "mocha-istanbul": "^0.2.0",
-    "should": "^6.0.1",
-    "supertest": "^0.15.0"
-  }
+  "homepage": "https://github.com/SEL-Columbia/dokomoforms#readme"
 }

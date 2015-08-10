@@ -1,58 +1,22 @@
-"""The dokomo JSON API"""
-from collections import Iterator
+"""Handlers for the API endpoints."""
+from dokomoforms.api.serializer import ModelJSONSerializer
 
-from sqlalchemy.engine import ResultProxy, Connection
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.sql import Insert, Update
-
-
-def execute_with_exceptions(connection: Connection,
-                            executable: [Insert, Update],
-                            exceptions: Iterator) -> ResultProxy:
-    """
-    Execute the given executable (a SQLAlchemy Insert or Update) within a
-    transaction (provided by the Connection object), and raise meaningful
-    exceptions. Normally connection.execute() will raise a generic Integrity
-    error, so use the exceptions parameter to specify which exceptions to
-    raise instead.
-
-    :param connection: the SQLAlchemy connection (for transaction purposes)
-    :param executable: the object to pass to connection.execute()
-    :param exceptions: an iterable of (name: str, exception: Exception) tuples.
-                       name is the string to look for in the IntegrityError,
-                       and exception is the Exception to raise instead of
-                       IntegrityError
-    :return: a SQLAlchemy ResultProxy
-    """
-    try:
-        return connection.execute(executable)
-    except IntegrityError as exc:
-        error = str(exc.orig)
-        for name, exception in exceptions:
-            if name in error:
-                raise exception
-        raise
+from dokomoforms.api.base import BaseResource
+from dokomoforms.api.surveys import SurveyResource, get_survey_for_handler
+from dokomoforms.api.submissions import (
+    SubmissionResource, get_submission_for_handler
+)
+from dokomoforms.api.nodes import NodeResource
+from dokomoforms.api.photos import PhotoResource
 
 
-def json_response(something: object) -> dict:
-    """
-    Turns out a list isn't real JSON.
+__all__ = (
+    'ModelJSONSerializer',
 
-    :param something: anything, especially a list
-    :return: {'result': something}
-    """
-    return {'result': something}
+    'BaseResource',
 
-
-def maybe_isoformat(date_or_time) -> str:
-    """
-    Return the date_or_time.isoformat() if date_or_time is not None,
-    else the empty string.
-
-    :param date_or_time: a Python date, time, etc.
-    :return: the ISO 8601 representation (or the empty string)
-    """
-    if date_or_time is None:
-        return None
-    else:
-        return date_or_time.isoformat()
+    'SurveyResource', 'get_survey_for_handler',
+    'SubmissionResource', 'get_submission_for_handler',
+    'NodeResource',
+    'PhotoResource',
+)

@@ -1,9 +1,10 @@
 language: python
 python:
-  - "3.3"
-sudo: false
+  - "3.4"
+  - "3.5"
 env:
   global:
+    - SAUCE_CONNECT=true
     - secure: L22k89oDjcsXggQUCNCHQPpVcRDybi/kiNJpjBMV+NbL/aZeCNBocbcaXe9XF9OhyJBiTwxpubo4DwjaidXVf14hHBppcuwrn+QBc2I7cOD5+oFf8IkemdXC9sCuich8fyL5+zBBEknh1MpiiBw5v5cW8qs9ok+N/oM85sEK3A4=
     - secure: V0Gv+NTYR0ODMUWW9/Fb8ZJC4aTo1pqsD7kxobp51kbe7p+Vn9Ntkt75GBXaw+3fJhU1Xp2029+/rvMTWv5GweJ3eMt2fEN2nwHPwm7MRabhFllzVvet5hXfLXZw+ZsLuWWXhDjEUXCESW2br3UeMDUPdxHTt/NCBEgIEWMmiR8=
   matrix:
@@ -43,25 +44,19 @@ env:
     - "BROWSER='internet explorer:11.0:Windows 7'"
     - "BROWSER='internet explorer::Windows 8'"
     - "BROWSER='internet explorer::Windows 8.1'"
+cache:
+  directories:
+    - $HOME/.cache/pip
 addons:
   postgresql: "9.4"
   sauce_connect: true
 
-# command to install dependencies
-# or at least it would be...? moving this to before_script so that Travis will cache dependencies
+install:
+  - pip install tox
 
-# what would go in "install" plus
-# database and flake8
 before_script:
-  - pip install -r requirements.txt
-  - pip install -r requirements-testing.txt
   - psql -c 'create database doko;' -U postgres
-  - python3 manage_db.py
-  - psql -U postgres -d doko -f tests/fixtures/all-encompassing.sql
-  - echo 'APP_DEBUG=True' > dokomoforms/local_settings.py
-  - echo 'SAUCE_CONNECT=True' >> dokomoforms/local_settings.py
-  - python3 webapp.py &
+  - head -c 24 /dev/urandom > cookie_secret
 
-# command to run tests
-script: 
-  - nosetests tests.selenium_test
+script:
+  - xvfb-run tox tests.test_selenium
