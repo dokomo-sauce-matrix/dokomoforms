@@ -43,9 +43,6 @@ env:
     - "BROWSER='internet explorer:11.0:Windows 7'"
     - "BROWSER='internet explorer::Windows 8'"
     - "BROWSER='internet explorer::Windows 8.1'"
-cache:
-  directories:
-    - $HOME/.cache/pip
 addons:
   postgresql: "9.4"
   sauce_connect: true
