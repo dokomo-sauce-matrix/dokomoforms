@@ -4,7 +4,7 @@ python:
   - "3.5"
 env:
   global:
-    - SAUCE_CONNECT=1
+    - SAUCE_CONNECT=true
     - secure: L22k89oDjcsXggQUCNCHQPpVcRDybi/kiNJpjBMV+NbL/aZeCNBocbcaXe9XF9OhyJBiTwxpubo4DwjaidXVf14hHBppcuwrn+QBc2I7cOD5+oFf8IkemdXC9sCuich8fyL5+zBBEknh1MpiiBw5v5cW8qs9ok+N/oM85sEK3A4=
     - secure: V0Gv+NTYR0ODMUWW9/Fb8ZJC4aTo1pqsD7kxobp51kbe7p+Vn9Ntkt75GBXaw+3fJhU1Xp2029+/rvMTWv5GweJ3eMt2fEN2nwHPwm7MRabhFllzVvet5hXfLXZw+ZsLuWWXhDjEUXCESW2br3UeMDUPdxHTt/NCBEgIEWMmiR8=
   matrix:
