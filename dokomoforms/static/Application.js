@@ -1,3 +1,6 @@
+//XXX Set on init
+revisit_url = "";
+
 var React = require('react');
 var $ = require('jquery');
 var PouchDB  = require('pouchdb');
@@ -586,7 +589,16 @@ var Application = React.createClass({
     }
 });
 
-init = function(survey) {
+init = function(survey, url) {
+    // Set revisit url
+    revisit_url = url;
+
+    // Listen to appcache updates, reload JS.
+    window.applicationCache.addEventListener('updateready', function() {
+        alert("Application updated, reloading ...");
+        window.location.reload();
+    });
+
     React.render(
             <Application survey={survey}/>,
             document.body

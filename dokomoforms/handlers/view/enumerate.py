@@ -6,6 +6,7 @@ from restless.exceptions import Unauthorized
 
 from dokomoforms.handlers.util import BaseHandler
 from dokomoforms.api import get_survey_for_handler
+from dokomoforms.options import options
 
 
 class Enumerate(BaseHandler):
@@ -35,4 +36,9 @@ class Enumerate(BaseHandler):
             self.redirect(url)
             return
 
-        self.render('view_enumerate.html', survey=survey)
+        # pass in the revisit url
+        self.render(
+            'view_enumerate.html',
+            survey=survey,
+            revisit_url=options.revisit_url
+        )

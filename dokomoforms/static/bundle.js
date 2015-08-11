@@ -1,5 +1,5 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
-var revisit_url = 'http://localhost:3000/api/v0/facilities.json';
+//var revisit_url = 'http://localhost:3000/api/v0/facilities.json';
 
 var $ = require('jquery');
 var LZString = require('lz-string');
@@ -1850,6 +1850,7 @@ module.exports = React.createClass({displayName: "exports",
                 // Unsynced and offline
                 return (
                         React.createElement(Card, {messages: [['You have ',  React.createElement("b", null, this.state.count), ' unsynced surveys.'], 
+                            '',
                             'At present, you do not have a network connection — please remember to submit' 
                                 + ' these surveys the next time you do have access to the internet.'
                         ], type: "message-warning"})
@@ -2168,6 +2169,11 @@ var PhotoAPI = require('../../PhotoAPI.js');
 module.exports = React.createClass({displayName: "exports",
 
     wipeActive: function() {
+        // Confirm their intent
+        var nuke = confirm("Warning: Active survey and photos will be lost.");
+        if (!nuke) 
+            return;
+
         var self = this;
         var survey = JSON.parse(localStorage[this.props.surveyID] || '{}');
         var questionIDs = Object.keys(survey);
@@ -2198,7 +2204,21 @@ module.exports = React.createClass({displayName: "exports",
         localStorage[this.props.surveyID] = JSON.stringify({});
         // Wipe location info
         localStorage['location'] = JSON.stringify({});
-        location.reload();
+        window.location.reload();
+    },
+
+    
+    wipeAll: function() {
+        var self = this;
+        // Confirm their intent
+        var nuke = confirm("Warning: All stored surveys and photos will be lost.");
+        if (!nuke) 
+            return;
+
+        localStorage.clear();
+        self.props.db.destroy().then(function() {
+            window.location.reload();
+        });
     },
 
     render: function() {
@@ -2206,19 +2226,12 @@ module.exports = React.createClass({displayName: "exports",
         return (
             React.createElement("div", {className: "title_menu"}, 
                 React.createElement("div", {className: "title_menu_option menu_restart", 
-                    onClick: function() {
-                        self.wipeActive();
-                    }
+                    onClick: self.wipeActive
                 }, 
                     "Cancel survey"
                 ), 
                 React.createElement("div", {className: "title_menu_option menu_clear", 
-                    onClick: function() {
-                        localStorage.clear();
-                        self.props.db.destroy().then(function() {
-                            location.reload();
-                        });
-                    }
+                    onClick: self.wipeAll
                 }, 
                     "Clear all saved surveys"
                 )
@@ -46890,6 +46903,9 @@ function hasOwnProperty(obj, prop) {
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"./support/isBuffer":293,"_process":292,"inherits":291}],295:[function(require,module,exports){
+//XXX Set on init
+revisit_url = "";
+
 var React = require('react');
 var $ = require('jquery');
 var PouchDB  = require('pouchdb');
@@ -47478,7 +47494,16 @@ var Application = React.createClass({displayName: "Application",
     }
 });
 
-init = function(survey) {
+init = function(survey, url) {
+    // Set revisit url
+    revisit_url = url;
+
+    // Listen to appcache updates, reload JS.
+    window.applicationCache.addEventListener('updateready', function() {
+        alert("Application updated, reloading ...");
+        window.location.reload();
+    });
+
     React.render(
             React.createElement(Application, {survey: survey}),
             document.body

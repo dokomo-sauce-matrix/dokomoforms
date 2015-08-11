@@ -1,5 +1,4 @@
 """Pages pertaining to debug-specific functionality."""
-
 from tornado.escape import json_encode
 import tornado.web
 
@@ -94,3 +93,15 @@ class DebugPersonaHandler(BaseHandler):
     def post(self):
         """The test user has logged in."""
         self.write({'status': 'okay', 'email': 'test_creator@fixtures.com'})
+
+
+class DebugRevisitHandler(BaseHandler):
+
+    """For testing purposes there's no need to hit Revisit proper."""
+
+    def get(self):
+        """Get the same fake facility (always)."""
+        with open('tests/fake_revisit_facilities.json') as facilities:
+            result = facilities.read()
+        self.write(result)
+        self.set_header('Content-Type', 'application/json')
