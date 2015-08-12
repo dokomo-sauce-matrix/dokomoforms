@@ -1,3 +1,4 @@
+//XXX set globally on init in application
 //var revisit_url = 'http://localhost:3000/api/v0/facilities.json';
 
 var $ = require('jquery');
@@ -110,7 +111,7 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
     facilityNode.prototype.within = function(lat, lng) {
         var self = this;
         return ((lat < self.en[1] && lat >= self.ws[1]) 
-               && (lng > self.ws[0] && lng <= self.es[0]));
+               && (lng > self.ws[0] && lng <= self.en[0]));
     }
 
     facilityNode.prototype.crossesBound = function(nlat, wlng, slat, elng) {
@@ -367,6 +368,7 @@ FacilityTree.prototype.print = function() {
     this.root.print();
 }
 
+
 FacilityTree.prototype._getLeaves = function(node) {
     var self = this;
 
@@ -426,15 +428,66 @@ FacilityTree.prototype.getCount = function() {
     }, 0);
 };
 
+FacilityTree.prototype.formatFacility = function(facilityData) {
+    var facility = {};
+    facility.uuid = facilityData.facility_id; 
+    facility.name = facilityData.facility_name; 
+    facility.properties = {sector: facilityData.facility_sector};
+    facility.coordinates = [facilityData.lng, facilityData.lat];
+    return facility;
+};
 
-// Helper get localStorage size
-window.ls = function() {
-    return Object.keys(localStorage).reduce(function(sum, key) {
-        return localStorage[key].length + sum
-    }, 0);
+FacilityTree.prototype.addFacility = function(lat, lng, facilityData, format) {
+    var self = this;
+    var leaf = self.getNNode(lat, lng);
+
+    format = Boolean(format) || true;
+    console.log("formating?", format);
+    var facility = format ? self.formatFacility(facilityData) : facilityData;
+
+    console.log("Before", leaf.count, leaf.uncompressedSize, leaf.compressedSize);
+    leaf.getFacilities().onResolve(function(err, facilities) {
+        if (err) {
+            console.log("Failed to add facility", err);
+            return;
+        }
+
+        console.log("Got facilities:", facilities.length);
+        facilities.push(facility);
+        var facilitiesStr = JSON.stringify(facilities);
+        var facilitiesLZ = [LZString.compressToUTF16(facilitiesStr)] // mongoose_quadtree does this in [] for a reason i do not remember 
+        leaf.setFacilities(facilitiesLZ);
+
+        leaf.count++;
+        leaf.uncompressedSize = facilitiesStr.length || 0;
+        leaf.compressedSize = facilitiesLZ.length || 0;
+        console.log("After", leaf.count, leaf.uncompressedSize, leaf.compressedSize);
+
+    });
 }
 
-console.log("Initilizing ... (wait for request to complete");
+FacilityTree.prototype.postFacility = function(facilityData, successCB, errorCB, format) {
+    var self = this;
+    format = Boolean(format) || true;
+    console.log("formating?", format);
+    var facility = format ? self.formatFacility(facilityData) : facilityData;
+    $.ajax({
+        url: revisit_url,
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(facility),
+        processData: false,
+        dataType: 'json',
+        success: successCB,
+
+        headers: {
+            "Authorization": "Basic " + btoa("dokomoforms" + ":" + "password")
+             //XXX Obsecure basic auth in bundlejs somehow? Force https after?
+        },
+
+        error: errorCB,
+    });
+}
 
 //Nigeria
 //var nlat = 8;
@@ -459,11 +512,10 @@ console.log("Initilizing ... (wait for request to complete");
 //var nyc = {lat: 40.80690, lng:-73.96536}
 //window.nyc = nyc;
 
-module.exports = FacilityTree;
-
 //tree.getCompressedSize() / 1048576
 //tree.getNNearestFacilities(7.353078, 5.118915, 500, 10)
 //tree.getNNearestFacilities(40.80690, -73.96536, 500, 10)
 //tree.getCompressedSize()/tree.getUncompressedSize()
 //tree.getRNodesRad(40.80690, -73.96536, 500)
 
+module.exports = FacilityTree;
