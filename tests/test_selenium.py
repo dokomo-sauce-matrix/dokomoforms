@@ -161,7 +161,8 @@ class DriverTest(tests.util.DokoHTTPTest):
             caps['disable-user-media-security'] = True
         # Try to start the remote webdriver a few times... For some reason
         # it fails sometimes with a ValueError.
-        for _ in range(5):
+        number_of_attempts = 10
+        for attempt in range(number_of_attempts):
             try:
                 self.drv = webdriver.Remote(
                     desired_capabilities=caps,
@@ -174,6 +175,8 @@ class DriverTest(tests.util.DokoHTTPTest):
                     'Sauce Connect failure. Did you start Sauce Connect?'
                 )
             except ValueError:
+                if attempt == number_of_attempts - 1:
+                    raise
                 continue
         self.drv.implicitly_wait(10)
 
@@ -214,6 +217,7 @@ class DriverTest(tests.util.DokoHTTPTest):
         WebDriverWait(self.drv, timeout).until(load)
 
     def set_geolocation(self, lat=40, lng=-70):
+        time.sleep(1)
         self.drv.execute_script(
             '''
             window.navigator.geolocation.getCurrentPosition =
@@ -225,6 +229,7 @@ class DriverTest(tests.util.DokoHTTPTest):
               }};
             '''.format(lat, lng)
         )
+        time.sleep(1)
 
     def click(self, element):
         element.click()
@@ -486,9 +491,7 @@ class TestEnumerate(DriverTest):
         self.get('/enumerate/{}'.format(survey_id))
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        time.sleep(1)
         self.set_geolocation()
-        time.sleep(1)
         self.click(
             self.drv
             .find_element_by_css_selector(
