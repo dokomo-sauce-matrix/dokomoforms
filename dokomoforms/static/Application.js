@@ -83,22 +83,46 @@ var Application = React.createClass({
      * if next question is not found to either SPLASH/SUBMIT
      */
     onNextButton: function() {
+        var surveyID = this.props.survey.id;
         var questions = this.props.survey.nodes;
         var nextQuestion = this.state.nextQuestion + 1;
+        var currentQuestion = this.state.nextQuestion;
         var nextState = this.state.state;
         var numQuestions = this.props.survey.nodes.length;
         var showDontKnow = false;
         var showDontKnowBox = false;
 
-        if (nextQuestion > -1 && nextQuestion < numQuestions) { 
-            nextState = this.state.states.QUESTION;
-            showDontKnow = questions[nextQuestion].allow_dont_know
+        // Look into active answers, check if any filled out if question is REQUIRED
+        if (this.state.states.QUESTION === this.state.state) { 
+            var required = questions[currentQuestion].required || false;
+            if (required) {
+                var questionID = questions[currentQuestion].id;
+                var survey = JSON.parse(localStorage[surveyID] || '{}');
+                var answers = (survey[questionID] || []).filter(function(response) {
+                    return (response && response.response !== null);
+                });
+
+                console.log("Responses to required question:", answers);
+
+                if (!answers.length) {
+                    alert("Valid response is required.");
+                    return;
+                }
+            }
         }
 
+        // Set the state to QUESTION if were moving into question range 
+        if (nextQuestion > -1 && nextQuestion < numQuestions) { 
+            nextState = this.state.states.QUESTION;
+            showDontKnow = questions[nextQuestion].allow_dont_know;
+        }
+
+        // Set the state to SUBMIT when reach the end of questions
         if (nextQuestion == numQuestions) {
             nextState = this.state.states.SUBMIT
         }
 
+        // Moving past the end returns us to the splash page
         if (nextQuestion > numQuestions) {
             nextQuestion = -1
             nextState = this.state.states.SPLASH
@@ -106,6 +130,7 @@ var Application = React.createClass({
             //XXX Fire Modal for submitting here
         }
 
+        // Look into footer, retrieve dontKnow value if any
         if (this.state.states.QUESTION === nextState && showDontKnow) {
             var questionID = questions[nextQuestion].id;
             var response = this.refs.footer.getAnswer(questionID);
@@ -180,6 +205,10 @@ var Application = React.createClass({
         this.props.survey.nodes.forEach(function(question) {
             var responses = survey[question.id] || [];
             responses.forEach(function(response) {
+                // Ignore empty responses
+                if (!response || response.response === null) {
+                    return true; // continue;
+                }
 
                 // Photos need to synced independantly from survey
                 if (question.type_constraint === 'photo') {
