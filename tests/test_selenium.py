@@ -69,7 +69,7 @@ def setUpModule():
             stderr=DEVNULL,
             preexec_fn=os.setsid,
         )
-        time.sleep(0.5)
+        time.sleep(2)
 
 
 def kill_webapp():
@@ -157,7 +157,7 @@ class DriverTest(tests.util.DokoFixtureTest):
             caps['name'] = ' -- '.join((
                 'Manual run',
                 browser_config,
-                self.__class__.__name__
+                '{}.{}'.format(self.__class__.__name__, self._testMethodName)
             ))
         hub_url = '{}:{}@localhost:4445'.format(self.username, self.access_key)
         cmd_executor = 'http://{}/wd/hub'.format(hub_url)
@@ -184,7 +184,7 @@ class DriverTest(tests.util.DokoFixtureTest):
             except ValueError:
                 if attempt == number_of_attempts - 1:
                     raise
-                continue
+                time.sleep(5)
         self.drv.implicitly_wait(10)
 
     def _set_sauce_status(self):
@@ -226,8 +226,13 @@ class DriverTest(tests.util.DokoFixtureTest):
         load = loader((by, identifier))
         WebDriverWait(self.drv, timeout).until(load)
 
+    def sleep(self, duration=None):
+        if duration is None:
+            duration = 1.25 if SAUCE_CONNECT else 0.25
+        time.sleep(duration)
+
     def set_geolocation(self, lat=40, lng=-70):
-        time.sleep(1)
+        self.sleep()
         self.drv.execute_script(
             '''
             window.navigator.geolocation.getCurrentPosition =
@@ -239,11 +244,11 @@ class DriverTest(tests.util.DokoFixtureTest):
               }};
             '''.format(lat, lng)
         )
-        time.sleep(1)
+        self.sleep()
 
     def click(self, element):
         element.click()
-        time.sleep(1)
+        self.sleep()
 
     def toggle_online(self):
         self.online = not self.online
@@ -256,6 +261,37 @@ class DriverTest(tests.util.DokoFixtureTest):
     def control_key(self):
         is_osx = self.platform.startswith('OS X')
         return Keys.COMMAND if is_osx else Keys.CONTROL
+
+    def enter_date(self, element, year, month, day):
+        if self.browser == 'chrome':
+            element.send_keys(month)
+            self.sleep()
+            element.send_keys(day)
+            self.sleep()
+            element.send_keys(year)
+            self.sleep()
+        else:
+            element.send_keys('/'.join((year, month, day)))
+
+    def enter_time(self, element, hour, minute, am_pm):
+        if self.browser == 'chrome':
+            element.send_keys(hour)
+            self.sleep()
+            element.send_keys(minute)
+            self.sleep()
+            element.send_keys(am_pm)
+            self.sleep()
+        else:
+            element.send_keys('{}:{} {}'.format(hour, minute, am_pm))
+
+    def enter_timestamp(self, element, year, month, day, hour, minute, am_pm):
+        self.enter_date(element, year, month, day)
+        if self.browser == 'chrome':
+            # For some reason this doesn't work...
+            element.send_keys(Keys.TAB)
+        else:
+            element.send_keys(' ')
+        self.enter_time(element, hour, minute, am_pm)
 
 
 class TestAuth(DriverTest):
@@ -395,7 +431,7 @@ class TestEnumerate(DriverTest):
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.wait_for_element('video', by=By.TAG_NAME, visible=True)
-        time.sleep(1)
+        self.sleep()
         self.click(
             self.drv
             .find_element_by_css_selector(
@@ -407,7 +443,7 @@ class TestEnumerate(DriverTest):
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_elements_by_tag_name('button')[0])
 
-        time.sleep(1)
+        self.sleep()
 
         new_submission = self.get_last_submission(survey_id)
 
@@ -428,10 +464,9 @@ class TestEnumerate(DriverTest):
         self.get('/enumerate/{}'.format(survey_id))
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        (
-            self.drv
-            .find_element_by_tag_name('input')
-            .send_keys('2015/08/11')
+        self.enter_date(
+            self.drv.find_element_by_tag_name('input'),
+            '2015', '08', '11'
         )
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
@@ -453,10 +488,9 @@ class TestEnumerate(DriverTest):
         self.get('/enumerate/{}'.format(survey_id))
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        (
-            self.drv
-            .find_element_by_tag_name('input')
-            .send_keys('3:33 PM')
+        self.enter_time(
+            self.drv.find_element_by_tag_name('input'),
+            '3', '33', 'PM'
         )
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
@@ -472,16 +506,17 @@ class TestEnumerate(DriverTest):
 
     @report_success_status
     def test_single_timestamp_question(self):
+        if self.browser == 'chrome':
+            raise unittest.SkipTest('Selenium + Chrome + timestamp == 😢')
         survey_id = self.get_single_node_survey_id('timestamp')
         existing_submission = self.get_last_submission(survey_id)
 
         self.get('/enumerate/{}'.format(survey_id))
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        (
-            self.drv
-            .find_element_by_tag_name('input')
-            .send_keys('2015/08/11 3:33 PM')
+        self.enter_timestamp(
+            self.drv.find_element_by_tag_name('input'),
+            '2015', '08', '11', '3', '33', 'PM'
         )
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
@@ -542,7 +577,7 @@ class TestEnumerate(DriverTest):
                 ' > div:nth-child(1) > button:nth-child(1)'
             )
         )
-        time.sleep(1)
+        self.sleep()
         self.click(
             self.drv
             .find_elements_by_class_name('question__radio__label')[0]
@@ -630,7 +665,7 @@ class TestEnumerate(DriverTest):
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
 
-        self.drv.get('')  # unload the page
+        self.drv.get('about:blank')  # unload the page
         self.get(enumerate_url)
 
         self.click(self.drv.find_elements_by_tag_name('button')[0])
