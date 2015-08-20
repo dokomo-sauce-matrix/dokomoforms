@@ -295,9 +295,14 @@ class SubSurvey(Base):
     )
 
     def _asdict(self) -> OrderedDict:
+        is_mc = self.parent_type_constraint == 'multiple_choice'
+        bucket_name = 'choice_id' if is_mc else 'bucket'
         return OrderedDict((
             ('deleted', self.deleted),
-            ('buckets', [bucket.bucket for bucket in self.buckets]),
+            (
+                'buckets',
+                [getattr(bucket, bucket_name) for bucket in self.buckets]
+            ),
             ('repeatable', self.repeatable),
             ('nodes', self.nodes),
         ))
@@ -342,7 +347,8 @@ class Bucket(Base):
     __mapper_args__ = {'polymorphic_on': bucket_type}
     __table_args__ = (
         sa.CheckConstraint(
-            'bucket_type::TEXT = sub_survey_parent_type_constraint::TEXT'
+            'bucket_type::TEXT = sub_survey_parent_type_constraint::TEXT',
+            name='bucket_type_matches_question_type'
         ),
         sa.ForeignKeyConstraint(
             [

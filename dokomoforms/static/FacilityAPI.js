@@ -5,7 +5,18 @@ var $ = require('jquery');
 var LZString = require('lz-string');
 var Promise = require('mpromise');
 
-var FacilityTree = function(nlat, wlng, slat, elng, db) {
+/*
+ * FacilityTree class, contains accessors for facilities
+ *
+ * @nlat: north latitude
+ * @slat: south latitude
+ * @elng: east longitude
+ * @wlng: west longitude
+ * 
+ *
+ * All underscore methods are helper methods to do the recursion
+ */
+var FacilityTree = function(nlat, wlng, slat, elng, db, id) {
     // Ajax request made below node definition
     var self = this;
     this.nlat = nlat;
@@ -13,7 +24,13 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
     this.slat = slat;
     this.elng = elng;
     this.db = db;
+    this.id = id;
 
+    /*
+     * FacilityNode class, node of the tree, knows how to access pouchDB to read compressed facilities
+     *
+     * @obj: JSON representation of the node
+     */
     var facilityNode = function(obj) {
         
         // Bounding Box
@@ -32,7 +49,7 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
         this.isRoot = obj.isRoot
         this.isLeaf = obj.isLeaf
         this.children = {};
-        if (this.isLeaf) {
+        if (this.isLeaf && obj.data) {
             this.setFacilities(obj.data);
         }
 
@@ -49,6 +66,7 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
         }
     
     };
+
 
     facilityNode.prototype.print = function(indent) {
         var indent = indent || "";
@@ -78,6 +96,11 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
         console.log(indent + "__");
     };
     
+    /*
+     * Set the facilities array into pouchDB
+     *
+     * facilities is a compressed LZString16 bit representation of facilities contained in an one entry array
+     */
     facilityNode.prototype.setFacilities = function(facilities) {
         var id = this.en[1]+""+this.ws[0]+""+this.ws[1]+""+this.en[0];
         // Upsert deals with put 409 conflict bs
@@ -92,6 +115,11 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
             });
     };
     
+    /*
+     * Get facilities for this node
+     *
+     * returns mpromise style promise that will contain an array of uncompressed facilities
+     */
     facilityNode.prototype.getFacilities = function() {
         var id = this.en[1]+""+this.ws[0]+""+this.ws[1]+""+this.en[0];
         var p = new Promise;
@@ -155,9 +183,14 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
             console.log("Recieved Data traversing");
             self.total = data.total;
             self.root = new facilityNode(data.facilities); 
+            self.storeTree();
         },
         error: function(data) {
-            console.log("Done");
+            console.log("Failed to retrieve data, building from local");
+            var facilities = self.loadTree(); 
+            if (facilities)
+                self.root = new facilityNode(facilities);
+
         },
     });
 
@@ -166,6 +199,21 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
             "&compressed");
 
 }
+
+/* Store facility tree in localStorage without children */
+FacilityTree.prototype.storeTree = function() {
+    // Data is never stored in object, stringifiying root should be sufficient
+    var facilities = JSON.parse(localStorage['facilities'] || '{}');
+    facilities[this.id] = this.root;
+    localStorage['facilities'] = JSON.stringify(facilities);
+}
+
+/* Load facility tree from localStorage */
+FacilityTree.prototype.loadTree = function() {
+    var facilities = JSON.parse(localStorage['facilities'] || '{}');
+    return facilities[this.id];
+}
+
 
 FacilityTree.prototype._getNNode = function(lat, lng, node) {
     var self = this;
@@ -206,6 +254,9 @@ FacilityTree.prototype._getNNode = function(lat, lng, node) {
     }
 }
 
+/*
+ * Get Nearest node to lat, lng
+ */
 FacilityTree.prototype.getNNode = function(lat, lng) {
     var self = this;
 
@@ -252,6 +303,9 @@ FacilityTree.prototype._getRNodes = function(nlat, wlng, slat, elng, node) {
     return nodes;
 }
 
+/*
+ * Get all nodes that cross the box defined by nlat, wlng, slat, elng
+ */
 FacilityTree.prototype.getRNodesBox = function(nlat, wlng, slat, elng) {
     var self = this;
 
@@ -262,6 +316,9 @@ FacilityTree.prototype.getRNodesBox = function(nlat, wlng, slat, elng) {
     return nodes;
 }
 
+/* 
+ * Get all nodes that cross the circle defined by lat, lng and radius r
+ */
 FacilityTree.prototype.getRNodesRad = function(lat, lng, r) {
     var self = this;
 
@@ -285,6 +342,8 @@ FacilityTree.prototype.getRNodesRad = function(lat, lng, r) {
 /*
  * Returns a promise with n nearest sorted facilities
  * pouchDB forces the async virus to spread to all getFacilities function calls :(
+ *
+ * XXX: Basically the only function that matters
  */
 FacilityTree.prototype.getNNearestFacilities = function(lat, lng, r, n) {
     var self = this;
@@ -404,11 +463,19 @@ FacilityTree.prototype._getLeaves = function(node) {
     return nodes;
 }
 
+/*
+ * Return all leaf nodes of the facility
+ * ie. any node with isLeaf flag set to true
+ */
 FacilityTree.prototype.getLeaves = function() {
     var self = this;
     return self._getLeaves(self.root);
 }
 
+/*
+ * Helper method to calculate compressed size
+ * (Sums up values in all leaves)
+ */
 FacilityTree.prototype.getCompressedSize = function() {
     var self = this;
     var leaves = self._getLeaves(self.root);;
@@ -417,6 +484,10 @@ FacilityTree.prototype.getCompressedSize = function() {
     }, 0);
 };
 
+/*
+ * Helper method to calculate uncompressed size
+ * (Sums up values in all leaves)
+ */
 FacilityTree.prototype.getUncompressedSize = function() {
     var self = this;
     var leaves = self._getLeaves(self.root);
@@ -425,6 +496,10 @@ FacilityTree.prototype.getUncompressedSize = function() {
     }, 0);
 };
 
+/*
+ * Helper method to calculate total facility count
+ * (Sums up values in all leaves)
+ */
 FacilityTree.prototype.getCount = function() {
     var self = this;
     var leaves = self._getLeaves(self.root);
@@ -433,6 +508,11 @@ FacilityTree.prototype.getCount = function() {
     }, 0);
 };
 
+/*
+ * Helper method for transforming facility data into Revisit format
+ *
+ * @facilityData: Facility data in dokomoforms submission form
+ */
 FacilityTree.prototype.formatFacility = function(facilityData) {
     var facility = {};
     facility.uuid = facilityData.facility_id; 
@@ -442,13 +522,20 @@ FacilityTree.prototype.formatFacility = function(facilityData) {
     return facility;
 };
 
-FacilityTree.prototype.addFacility = function(lat, lng, facilityData, format) {
+/*
+ * Adds a facility to local copy of facilityTree
+ *
+ * @lat, lng: location to add facility
+ * @facilityData: Facility information to add into tree
+ * @formatted: if facilityData is already in correct format (will be converted if not set)
+ */
+FacilityTree.prototype.addFacility = function(lat, lng, facilityData, formatted) {
     var self = this;
     var leaf = self.getNNode(lat, lng);
 
-    format = Boolean(format) || true;
-    console.log("formating?", format);
-    var facility = format ? self.formatFacility(facilityData) : facilityData;
+    formatted = Boolean(formatted) || false;
+    console.log("formatted?", formatted);
+    var facility = formatted ? facilityData : self.formattedFacility(facilityData);
 
     console.log("Before", leaf.count, leaf.uncompressedSize, leaf.compressedSize);
     leaf.getFacilities().onResolve(function(err, facilities) {
@@ -471,11 +558,21 @@ FacilityTree.prototype.addFacility = function(lat, lng, facilityData, format) {
     });
 }
 
-FacilityTree.prototype.postFacility = function(facilityData, successCB, errorCB, format) {
+/*
+ * Post facility to Revisit
+ *
+ * @facilityData: Facility information to send to revisit
+ * @successCB: What to do on succesful post
+ * @errorCB: What to do on unsuccesful post
+ * @formatted: if facilityData is already in correct format (will be converted if not set)
+ */
+FacilityTree.prototype.postFacility = function(facilityData, successCB, errorCB, formatted) {
     var self = this;
-    format = Boolean(format) || true;
-    console.log("formating?", format);
-    var facility = format ? self.formatFacility(facilityData) : facilityData;
+
+    formatted = Boolean(formatted) || false;
+    console.log("formatted?", formatted);
+    var facility = formatted ? facilityData : self.formattedFacility(facilityData);
+
     $.ajax({
         url: revisit_url,
         type: 'POST',
@@ -494,6 +591,11 @@ FacilityTree.prototype.postFacility = function(facilityData, successCB, errorCB,
     });
 }
 
+/*
+ * Compute lat lng distance from center {lat, lng}
+ *
+ * XXX function is copied in a few places with mild alterations, prob should be merged
+ */
 FacilityTree.prototype.distance = function(lat, lng, center) {
     var self = this;
     var R = 6371000; // metres

@@ -6,7 +6,18 @@ var $ = require('jquery');
 var LZString = require('lz-string');
 var Promise = require('mpromise');
 
-var FacilityTree = function(nlat, wlng, slat, elng, db) {
+/*
+ * FacilityTree class, contains accessors for facilities
+ *
+ * @nlat: north latitude
+ * @slat: south latitude
+ * @elng: east longitude
+ * @wlng: west longitude
+ * 
+ *
+ * All underscore methods are helper methods to do the recursion
+ */
+var FacilityTree = function(nlat, wlng, slat, elng, db, id) {
     // Ajax request made below node definition
     var self = this;
     this.nlat = nlat;
@@ -14,7 +25,13 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
     this.slat = slat;
     this.elng = elng;
     this.db = db;
+    this.id = id;
 
+    /*
+     * FacilityNode class, node of the tree, knows how to access pouchDB to read compressed facilities
+     *
+     * @obj: JSON representation of the node
+     */
     var facilityNode = function(obj) {
         
         // Bounding Box
@@ -33,7 +50,7 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
         this.isRoot = obj.isRoot
         this.isLeaf = obj.isLeaf
         this.children = {};
-        if (this.isLeaf) {
+        if (this.isLeaf && obj.data) {
             this.setFacilities(obj.data);
         }
 
@@ -50,6 +67,7 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
         }
     
     };
+
 
     facilityNode.prototype.print = function(indent) {
         var indent = indent || "";
@@ -79,6 +97,11 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
         console.log(indent + "__");
     };
     
+    /*
+     * Set the facilities array into pouchDB
+     *
+     * facilities is a compressed LZString16 bit representation of facilities contained in an one entry array
+     */
     facilityNode.prototype.setFacilities = function(facilities) {
         var id = this.en[1]+""+this.ws[0]+""+this.ws[1]+""+this.en[0];
         // Upsert deals with put 409 conflict bs
@@ -93,6 +116,11 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
             });
     };
     
+    /*
+     * Get facilities for this node
+     *
+     * returns mpromise style promise that will contain an array of uncompressed facilities
+     */
     facilityNode.prototype.getFacilities = function() {
         var id = this.en[1]+""+this.ws[0]+""+this.ws[1]+""+this.en[0];
         var p = new Promise;
@@ -156,9 +184,14 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
             console.log("Recieved Data traversing");
             self.total = data.total;
             self.root = new facilityNode(data.facilities); 
+            self.storeTree();
         },
         error: function(data) {
-            console.log("Done");
+            console.log("Failed to retrieve data, building from local");
+            var facilities = self.loadTree(); 
+            if (facilities)
+                self.root = new facilityNode(facilities);
+
         },
     });
 
@@ -167,6 +200,21 @@ var FacilityTree = function(nlat, wlng, slat, elng, db) {
             "&compressed");
 
 }
+
+/* Store facility tree in localStorage without children */
+FacilityTree.prototype.storeTree = function() {
+    // Data is never stored in object, stringifiying root should be sufficient
+    var facilities = JSON.parse(localStorage['facilities'] || '{}');
+    facilities[this.id] = this.root;
+    localStorage['facilities'] = JSON.stringify(facilities);
+}
+
+/* Load facility tree from localStorage */
+FacilityTree.prototype.loadTree = function() {
+    var facilities = JSON.parse(localStorage['facilities'] || '{}');
+    return facilities[this.id];
+}
+
 
 FacilityTree.prototype._getNNode = function(lat, lng, node) {
     var self = this;
@@ -207,6 +255,9 @@ FacilityTree.prototype._getNNode = function(lat, lng, node) {
     }
 }
 
+/*
+ * Get Nearest node to lat, lng
+ */
 FacilityTree.prototype.getNNode = function(lat, lng) {
     var self = this;
 
@@ -253,6 +304,9 @@ FacilityTree.prototype._getRNodes = function(nlat, wlng, slat, elng, node) {
     return nodes;
 }
 
+/*
+ * Get all nodes that cross the box defined by nlat, wlng, slat, elng
+ */
 FacilityTree.prototype.getRNodesBox = function(nlat, wlng, slat, elng) {
     var self = this;
 
@@ -263,6 +317,9 @@ FacilityTree.prototype.getRNodesBox = function(nlat, wlng, slat, elng) {
     return nodes;
 }
 
+/* 
+ * Get all nodes that cross the circle defined by lat, lng and radius r
+ */
 FacilityTree.prototype.getRNodesRad = function(lat, lng, r) {
     var self = this;
 
@@ -286,6 +343,8 @@ FacilityTree.prototype.getRNodesRad = function(lat, lng, r) {
 /*
  * Returns a promise with n nearest sorted facilities
  * pouchDB forces the async virus to spread to all getFacilities function calls :(
+ *
+ * XXX: Basically the only function that matters
  */
 FacilityTree.prototype.getNNearestFacilities = function(lat, lng, r, n) {
     var self = this;
@@ -405,11 +464,19 @@ FacilityTree.prototype._getLeaves = function(node) {
     return nodes;
 }
 
+/*
+ * Return all leaf nodes of the facility
+ * ie. any node with isLeaf flag set to true
+ */
 FacilityTree.prototype.getLeaves = function() {
     var self = this;
     return self._getLeaves(self.root);
 }
 
+/*
+ * Helper method to calculate compressed size
+ * (Sums up values in all leaves)
+ */
 FacilityTree.prototype.getCompressedSize = function() {
     var self = this;
     var leaves = self._getLeaves(self.root);;
@@ -418,6 +485,10 @@ FacilityTree.prototype.getCompressedSize = function() {
     }, 0);
 };
 
+/*
+ * Helper method to calculate uncompressed size
+ * (Sums up values in all leaves)
+ */
 FacilityTree.prototype.getUncompressedSize = function() {
     var self = this;
     var leaves = self._getLeaves(self.root);
@@ -426,6 +497,10 @@ FacilityTree.prototype.getUncompressedSize = function() {
     }, 0);
 };
 
+/*
+ * Helper method to calculate total facility count
+ * (Sums up values in all leaves)
+ */
 FacilityTree.prototype.getCount = function() {
     var self = this;
     var leaves = self._getLeaves(self.root);
@@ -434,6 +509,11 @@ FacilityTree.prototype.getCount = function() {
     }, 0);
 };
 
+/*
+ * Helper method for transforming facility data into Revisit format
+ *
+ * @facilityData: Facility data in dokomoforms submission form
+ */
 FacilityTree.prototype.formatFacility = function(facilityData) {
     var facility = {};
     facility.uuid = facilityData.facility_id; 
@@ -443,13 +523,20 @@ FacilityTree.prototype.formatFacility = function(facilityData) {
     return facility;
 };
 
-FacilityTree.prototype.addFacility = function(lat, lng, facilityData, format) {
+/*
+ * Adds a facility to local copy of facilityTree
+ *
+ * @lat, lng: location to add facility
+ * @facilityData: Facility information to add into tree
+ * @formatted: if facilityData is already in correct format (will be converted if not set)
+ */
+FacilityTree.prototype.addFacility = function(lat, lng, facilityData, formatted) {
     var self = this;
     var leaf = self.getNNode(lat, lng);
 
-    format = Boolean(format) || true;
-    console.log("formating?", format);
-    var facility = format ? self.formatFacility(facilityData) : facilityData;
+    formatted = Boolean(formatted) || false;
+    console.log("formatted?", formatted);
+    var facility = formatted ? facilityData : self.formattedFacility(facilityData);
 
     console.log("Before", leaf.count, leaf.uncompressedSize, leaf.compressedSize);
     leaf.getFacilities().onResolve(function(err, facilities) {
@@ -472,11 +559,21 @@ FacilityTree.prototype.addFacility = function(lat, lng, facilityData, format) {
     });
 }
 
-FacilityTree.prototype.postFacility = function(facilityData, successCB, errorCB, format) {
+/*
+ * Post facility to Revisit
+ *
+ * @facilityData: Facility information to send to revisit
+ * @successCB: What to do on succesful post
+ * @errorCB: What to do on unsuccesful post
+ * @formatted: if facilityData is already in correct format (will be converted if not set)
+ */
+FacilityTree.prototype.postFacility = function(facilityData, successCB, errorCB, formatted) {
     var self = this;
-    format = Boolean(format) || true;
-    console.log("formating?", format);
-    var facility = format ? self.formatFacility(facilityData) : facilityData;
+
+    formatted = Boolean(formatted) || false;
+    console.log("formatted?", formatted);
+    var facility = formatted ? facilityData : self.formattedFacility(facilityData);
+
     $.ajax({
         url: revisit_url,
         type: 'POST',
@@ -495,6 +592,11 @@ FacilityTree.prototype.postFacility = function(facilityData, successCB, errorCB,
     });
 }
 
+/*
+ * Compute lat lng distance from center {lat, lng}
+ *
+ * XXX function is copied in a few places with mild alterations, prob should be merged
+ */
 FacilityTree.prototype.distance = function(lat, lng, center) {
     var self = this;
     var R = 6371000; // metres
@@ -602,7 +704,7 @@ module.exports = {
 
     /* 
      * Add photo with given uuid and base64 URI to pouchDB
-     * XXX set up callback
+     * TODO set up callback
      */
     addPhoto: function(db, photoID, photo, callback) {
         var photo64 = photo.substring(photo.indexOf(',')+1)
@@ -1876,14 +1978,23 @@ var BigButton = require('./baseComponents/BigButton.js');
  */
 module.exports = React.createClass({displayName: "exports",
     getInitialState: function() {
+        var self = this;
         // Get all unsynced surveys
         var unsynced_surveys = JSON.parse(localStorage['unsynced'] || '{}');
         // Get array of unsynced submissions to this survey
         var unsynced_submissions = unsynced_surveys[this.props.surveyID] || [];
 
+        // Update navigator.onLine
+        var interval = window.setInterval(function() {
+            self.setState({
+                online: navigator.onLine,
+            });
+        }, 1000);
+
         return { 
             count: unsynced_submissions.length,
             online: navigator.onLine,
+            interval: interval,
         }
     },
 
@@ -1914,6 +2025,10 @@ module.exports = React.createClass({displayName: "exports",
             online: navigator.onLine,
         });
 
+    },
+
+    componentWillUnmount: function() {
+       window.clearInterval(this.state.interval);
     },
 
     getCard: function() {
@@ -2151,7 +2266,6 @@ module.exports = React.createClass({displayName: "exports",
         //e.stopPropagation();
         //e.cancelBubble = true;
 
-        console.log('selected', option, checked);
         if (this.props.selectFunction)
             this.props.selectFunction(selected);
 
@@ -2424,7 +2538,6 @@ module.exports = React.createClass({displayName: "exports",
     // Determine the input field type based on props.type
     getResponseType: function() {
         var type = this.props.type;
-        console.log(type);
         switch(type) {
             case "integer":
             case "decimal":
@@ -2445,7 +2558,6 @@ module.exports = React.createClass({displayName: "exports",
     // Determine the input field step based on props.type
     getResponseStep: function() {
         var type = this.props.type;
-        console.log(type);
         switch(type) {
             case "decimal":
                 return "any"
@@ -2495,14 +2607,12 @@ module.exports = React.createClass({displayName: "exports",
 
                 if (logic && logic.min && typeof logic.min === 'number') {
                     if (val < logic.min) {
-                        console.log("Failed logic");
                         val = null;
                     }
                 }
 
                 if (logic && logic.max && typeof logic.max === 'number') {
                     if (val > logic.max) {
-                        console.log("Failed logic");
                         val = null;
                     }
                 }
@@ -2520,14 +2630,12 @@ module.exports = React.createClass({displayName: "exports",
                
                 if (logic && logic.min && !isNaN((new Date(logic.min)).getDate())) {
                     if (resp < new Date(logic.min)) {
-                        console.log("Failed logic");
                         val = null;
                     }
                 }
 
                 if (logic && logic.max && !isNaN((new Date(logic.max)).getDate())) {
                     if (resp > new Date(logic.max)) {
-                        console.log("Failed logic");
                         val = null;
                     }
                 }
@@ -2535,6 +2643,7 @@ module.exports = React.createClass({displayName: "exports",
                 break;
             case "timestamp":
             case "time":
+                //TODO: enforce
             default:
               if (answer) {
                   val = answer;
@@ -47023,34 +47132,43 @@ var FacilityTree = require('./FacilityAPI.js');
  */
 var Application = React.createClass({displayName: "Application",
     getInitialState: function() {
+        // Set up db for photos and facility tree
         var trees = {};
-        window.trees = trees;
-        var nyc = {lat: 40.80690, lng:-73.96536}
-        window.nyc = nyc;
-        
         var surveyDB = new PouchDB(this.props.survey.id, {
-                    'auto_compation': true,
+                    'auto_compaction': true,
         });
-
-        this.props.survey.nodes.forEach(function(node) {
-            if (node.type_constraint === 'facility') {
-                console.log(node.logic);
-                console.log(node);
-                trees[node.id] = new FacilityTree(
-                        parseFloat(node.logic.nlat), 
-                        parseFloat(node.logic.wlng), 
-                        parseFloat(node.logic.slat), 
-                        parseFloat(node.logic.elng),
-                        surveyDB);
-            }
-        });
-
         window.surveyDB = surveyDB;
+
+        // Build initial linked list
+        var questions = this.props.survey.nodes;
+        var first_question = null;
+        questions.forEach(function(node, idx) {
+            var question = node;
+            question.prev = null;
+            question.next = null;
+            if (idx > 0) {
+                question.prev = questions[idx - 1];
+            }
+
+            if (idx < questions.length - 1) {
+                question.next = questions[idx + 1];
+            }
+
+            if (idx === 0) {
+                first_question = question;
+            }
+
+        });
+
+        // Recursively construct trees
+        this.buildTrees(questions, trees); 
 
         return { 
             showDontKnow: false,
             showDontKnowBox: false,
-            nextQuestion: -1,
+            head: first_question,
+            question: null,
+            headStack: [], //XXX Stack of linked list heads
             states : {
                 SPLASH : 1,
                 QUESTION : 2,
@@ -47063,71 +47181,220 @@ var Application = React.createClass({displayName: "Application",
     },
 
     /*
+     * Create Facility Tree object at node id for every facility tree question
+     * Recurse into subnodes if found
+     *
+     * @questions: all nodes at current sub level
+     * @trees: dictionary of question ids and facility trees
+     *
+     * NOTE: facility trees update exact same location in pouchdb (based on bounds of coordinates)
+     * i.e: Multiple trees with same bounds do not increase memory usage (network usage does increase though)
+     */
+    buildTrees: function(questions, trees) {
+        var self = this;
+        questions = questions || [];
+
+        questions.forEach(function(node, idx) {
+            if (node.type_constraint === 'facility') {
+                trees[node.id] = new FacilityTree(
+                        parseFloat(node.logic.nlat), 
+                        parseFloat(node.logic.wlng), 
+                        parseFloat(node.logic.slat), 
+                        parseFloat(node.logic.elng),
+                        surveyDB,
+                        node.id
+                        );
+            }
+
+            if (node.sub_surveys) {
+                node.sub_surveys.forEach(function(subs) {
+                    self.buildTrees(subs.nodes, trees);
+                });
+            }
+        });
+    },
+
+    /*
      * Load next question, updates state of the Application
-     * if next question is not found to either SPLASH/SUBMIT
+     * if next question is not found move to either SPLASH/SUBMIT
+     * 
+     * Deals with branching, required and setting up dontknow footer state
+     * Uses refs! (Could be removed)
      */
     onNextButton: function() {
+        var self = this;
         var surveyID = this.props.survey.id;
-        var questions = this.props.survey.nodes;
-        var nextQuestion = this.state.nextQuestion + 1;
-        var currentQuestion = this.state.nextQuestion;
-        var nextState = this.state.state;
-        var numQuestions = this.props.survey.nodes.length;
+        var currentState = this.state.state;
+        var currentQuestion = this.state.question;
+
+        // Set up next state
+        var nextQuestion = null;
         var showDontKnow = false;
         var showDontKnowBox = false;
+        var state = this.state.states.SPLASH;
+        var head = this.state.head;
+        var headStack = this.state.headStack;
 
-        // Look into active answers, check if any filled out if question is REQUIRED
-        if (this.state.states.QUESTION === this.state.state) { 
-            var required = questions[currentQuestion].required || false;
-            if (required) {
-                var questionID = questions[currentQuestion].id;
+        console.log("Current Question", currentQuestion);
+
+        switch(currentState) {
+            // On Submit page and next was pressed
+            case this.state.states.SUBMIT:
+                nextQuestion = null;
+                showDontKnow = false;
+                showDontKnowBox = false;
+                state = this.state.states.SPLASH
+                //XXX Fire Modal for submitting here
+                this.onSave();
+
+                // Reset Survey Linked List
+                head = this.state.headStack[0] || head; 
+                while(head.prev) {
+                    head = head.prev;
+                };
+                headStack = [];
+                break;
+
+            // On Splash page and next was pressed
+            case this.state.states.SPLASH:
+                nextQuestion = this.state.head;
+                showDontKnow = nextQuestion.allow_dont_know || false;
+                showDontKnowBox = false;
+                state = this.state.states.QUESTION
+
+                var questionID = nextQuestion.id;
+                if (showDontKnow) { 
+                    var response = this.refs.footer.getAnswer(questionID);
+                    console.log("Footer response:", response);
+                    showDontKnowBox = Boolean(response);
+                }
+
+                break;
+
+            case this.state.states.QUESTION:
+                // Look into active answers, check if any filled out if question is REQUIRED
+                var required = currentQuestion.required || false;
+                if (required) {
+                    var questionID = currentQuestion.id;
+                    var survey = JSON.parse(localStorage[surveyID] || '{}');
+                    var answers = (survey[questionID] || []).filter(function(response) {
+                        return (response && response.response !== null);
+                    });
+
+                    if (!answers.length) {
+                        alert("Valid response is required.");
+                        return;
+                    }
+                }
+                
+                // Get answer
+                var questionID = currentQuestion.id;
                 var survey = JSON.parse(localStorage[surveyID] || '{}');
                 var answers = (survey[questionID] || []).filter(function(response) {
                     return (response && response.response !== null);
                 });
 
-                console.log("Responses to required question:", answers);
+                // XXX Confirm response type is answer (instead of dont-know/other)
+                var answer = answers.length && answers[0].response || null;
+                var sub_surveys = currentQuestion.sub_surveys;
 
-                if (!answers.length) {
-                    alert("Valid response is required.");
-                    return;
+                // If has subsurveys then it can branch
+                if (sub_surveys) {
+                    console.log("Subsurveys:", currentQuestion.id, sub_surveys);
+                    console.log("Answer:", answer);
+
+                    // Check which subsurvey this answer buckets into
+                    var BREAK = false;
+                    sub_surveys.forEach(function(sub) {
+                        if (BREAK) {return;}
+                        console.log("Bucket:", sub.buckets, "Type:", currentQuestion.type_constraint);
+
+                        // Append all subsurveys to clone of current question, update head, update headStack if in bucket
+                        var inBee = self.inBucket(sub.buckets, currentQuestion.type_constraint, answer);
+                        if (inBee) {
+                            // Clone current element
+                            var clone = self.cloneNode(currentQuestion);
+                            var temp = clone.next;
+
+                            // link sub nodes
+                            // TODO: Deal with repeatable flag here!
+                            // XXX: When adding repeat questions make sure to augment the question.id in a repeatable and unique way
+                            // XXX: QuestionIDs are used to distinguish/remember questions everywhere, do not reuse IDs!
+                            for (var i = 0; i < sub.nodes.length; i++) {
+                                if (i == 0) {
+                                    clone.next = sub.nodes[i];
+                                    sub.nodes[i].prev = clone;
+                                } else {
+                                    sub.nodes[i].prev = sub.nodes[i - 1];;
+                                }
+
+                                if (i === sub.nodes.length - 1) {
+                                    sub.nodes[i].next = temp;
+                                    if (temp)
+                                        temp.prev = sub.nodes[i];
+                                } else { 
+                                    sub.nodes[i].next = sub.nodes[i + 1];
+                                }
+                            }
+
+                            // Always add branchable questions previous state into headStack
+                            // This is how we can revert alterations to a branched question
+                            headStack.push(currentQuestion);
+
+                            // Find the head
+                            var newHead = clone;
+                            while(newHead.prev) {
+                                newHead = newHead.prev;
+                            }
+                            head = newHead;
+
+                            // Set current question to CLONE always
+                            currentQuestion = clone;
+
+                            BREAK = true;// break
+                        }
+
+                    });
+
                 }
-            }
-        }
 
-        // Set the state to QUESTION if were moving into question range 
-        if (nextQuestion > -1 && nextQuestion < numQuestions) { 
-            nextState = this.state.states.QUESTION;
-            showDontKnow = questions[nextQuestion].allow_dont_know;
-        }
+                nextQuestion = currentQuestion.next;
+                state = this.state.states.QUESTION
 
-        // Set the state to SUBMIT when reach the end of questions
-        if (nextQuestion == numQuestions) {
-            nextState = this.state.states.SUBMIT
-        }
+                // Set the state to SUBMIT when reach the end of questions
+                if (nextQuestion === null) {
+                    nextQuestion = currentQuestion; //Keep track of tail
+                    showDontKnow = false;
+                    showDontKnowBox = false;
+                    state = this.state.states.SUBMIT;
+                    break;
+                }
 
-        // Moving past the end returns us to the splash page
-        if (nextQuestion > numQuestions) {
-            nextQuestion = -1
-            nextState = this.state.states.SPLASH
-            this.onSave();
-            //XXX Fire Modal for submitting here
-        }
+                // Moving into a valid question
+                showDontKnow = nextQuestion.allow_dont_know || false;
+                showDontKnowBox = false;
+                var questionID = nextQuestion.id;
 
-        // Look into footer, retrieve dontKnow value if any
-        if (this.state.states.QUESTION === nextState && showDontKnow) {
-            var questionID = questions[nextQuestion].id;
-            var response = this.refs.footer.getAnswer(questionID);
-            console.log("Footer response:", response);
-            showDontKnowBox = Boolean(response);
+                if (showDontKnow) { 
+                    var response = this.refs.footer.getAnswer(questionID);
+                    console.log("Footer response:", response);
+                    showDontKnowBox = Boolean(response);
+                }
+
+                break;
+
         }
 
         this.setState({
-            nextQuestion: nextQuestion,
+            question: nextQuestion,
             showDontKnow: showDontKnow,
             showDontKnowBox: showDontKnowBox,
-            state: nextState
+            head: head,
+            headStack: headStack,
+            state: state
         })
+
+        return;
 
     },
 
@@ -47136,37 +47403,280 @@ var Application = React.createClass({displayName: "Application",
      * if prev question is not found to SPLASH
      */
     onPrevButton: function() {
-        var questions = this.props.survey.nodes;
-        var nextQuestion = this.state.nextQuestion - 1;
-        var nextState = this.state.state;
-        var numQuestions = this.props.survey.nodes.length;
+        var self = this;
+        var surveyID = this.props.survey.id;
+        var currentState = this.state.state;
+        var currentQuestion = this.state.question;
+
+        // Set up next state
+        var nextQuestion = null;
         var showDontKnow = false;
         var showDontKnowBox = false;
-        
-        if (nextQuestion < numQuestions && nextQuestion > 0) {
-            nextState = this.state.states.QUESTION;
-            showDontKnow = questions[nextQuestion].allow_dont_know
-        }
+        var state = this.state.states.SPLASH;
+        var head = this.state.head;
+        var headStack = this.state.headStack;
 
-        if (nextQuestion <= -1) { 
-            nextState = this.state.states.SPLASH;
-            nextQuestion = -1;
-        }
+        switch(currentState) {
+            // On Submit page and prev was pressed
+            case this.state.states.SUBMIT:
+                nextQuestion = currentQuestion; // Tail was saved in current question
 
-        if (this.state.states.QUESTION === nextState && showDontKnow) {
-            var questionID = questions[nextQuestion].id;
-            var response = this.refs.footer.getAnswer(questionID);
-            console.log("Footer response:", response);
-            showDontKnowBox = Boolean(response);
+                // Branching ONLY happens when moving BACK into branchable question
+                // Rare but can happen on question that either leads to submit or more questions
+                var sub_surveys = nextQuestion.sub_surveys;
+                if (sub_surveys && headStack.length) {
+                    // If he's in the branched stack, pop em off
+                    if (headStack[headStack.length - 1].id === nextQuestion.id) {
+                        console.log("RESETING", nextQuestion.id, headStack.length);
+                        // Reset the nextQuestion to previously unbranched state
+                        nextQuestion = headStack.pop();
+                        console.log("RESET", nextQuestion.id, headStack.length);
+                        // Find the head
+                        var newHead = nextQuestion;
+                        while(newHead.prev) {
+                            newHead = newHead.prev;
+                        }
+                        head = newHead;
+                    }
+                }
+
+
+                showDontKnow = currentQuestion.allow_dont_know || false;
+                showDontKnowBox = false;
+                state = this.state.states.QUESTION
+
+                var questionID = currentQuestion.id;
+                if (showDontKnow) { 
+                    var response = this.refs.footer.getAnswer(questionID);
+                    console.log("Footer response:", response);
+                    showDontKnowBox = Boolean(response);
+                }
+                break;
+
+            // On Splash page and prev was pressed (IMPOSSIBLE)
+            case this.state.states.SPLASH:
+                nextQuestion = null;
+                showDontKnowBox = false;
+                showDontKnow = false;
+                state = this.state.states.SPLASH
+                break;
+
+            case this.state.states.QUESTION:
+                nextQuestion = currentQuestion.prev;
+                state = this.state.states.QUESTION
+
+                // Set the state to SUBMIT when reach the end of questions
+                if (nextQuestion === null) {
+                    nextQuestion = currentQuestion;
+                    showDontKnow = false;
+                    showDontKnowBox = false;
+                    state = this.state.states.SPLASH;
+                    break;
+                }
+
+                // Branching ONLY happens when moving BACK into branchable question
+                // ALWAYS undo branched state to maintain survey consitency 
+                var sub_surveys = nextQuestion.sub_surveys;
+                if (sub_surveys && headStack.length) {
+                    // If he's in the branched stack, pop em off
+                    if (headStack[headStack.length - 1].id === nextQuestion.id) {
+                        console.log("RESETING", nextQuestion.id, headStack.length);
+                        // Reset the nextQuestion to previously unbranched state
+                        nextQuestion = headStack.pop();
+                        console.log("RESET", nextQuestion.id, headStack.length);
+                        // Find the head
+                        var newHead = nextQuestion;
+                        while(newHead.prev) {
+                            newHead = newHead.prev;
+                        }
+                        head = newHead;
+                    }
+                }
+
+
+                // Moving into a valid question
+                showDontKnow = nextQuestion.allow_dont_know || false;
+                showDontKnowBox = false;
+                var questionID = nextQuestion.id;
+
+                if (showDontKnow) { 
+                    var response = this.refs.footer.getAnswer(questionID);
+                    console.log("Footer response:", response);
+                    showDontKnowBox = Boolean(response);
+                }
+
+                break;
+
         }
 
         this.setState({
-            nextQuestion: nextQuestion,
+            question: nextQuestion,
             showDontKnow: showDontKnow,
             showDontKnowBox: showDontKnowBox,
-            state: nextState
+            head: head,
+            headStack: headStack,
+            state: state
         })
 
+        return;
+
+    },
+
+    /* 
+     * Check if response is in bucket
+     * 
+     * @buckets: Array of buckets (can be ranges in [num,num) form or "qid" for mc
+     * @type: type of bucket
+     * @resposne: answer to check if in bucket 
+     */
+    inBucket: function(buckets, type, response) {
+        if (response === null) 
+            return false;
+
+        switch(type) {
+            case "integer":
+            case "decimal":
+                var inBee = 1; // Innocent untill proven guilty
+                // Split bucket into four sections, confirm that value in range, otherwise set inBee to false
+                var BREAK = false;
+                buckets.forEach(function(bucket) {
+                    if (BREAK) {return;}
+                    inBee = 1;
+                    var left = bucket.split(',')[0];
+                    var right = bucket.split(',')[1];
+                    if (left[0] === "[") {
+                        var leftLim = parseFloat(left.split("[")[1]);
+                        console.log("Inclusive Left", leftLim);
+                        if (!isNaN(leftLim)) // Infinity doesnt need to be checked
+                            inBee &= (response >= leftLim);
+                    } else if (left[0] === "(") {
+                        var leftLim = parseFloat(left.split("(")[1]);
+                        console.log("Exclusive Left", leftLim);
+                        if (!isNaN(leftLim)) // Infinity doesnt need to be checked
+                            inBee &= (response > leftLim)
+                    } else {
+                        inBee = 0;
+                    }
+
+                    if (right[right.length - 1] === "]") {
+                        var rightLim = parseFloat(right.split("]")[0]);
+                        console.log("Inclusive Right", rightLim);
+                        if (!isNaN(rightLim)) // Infinity doesnt need to be checked
+                            inBee &= (response <= rightLim)
+                    } else if (right[right.length - 1] === ")") {
+                        var rightLim = parseFloat(right.split(")")[0]);
+                        console.log("Exclusive Right", rightLim);
+                        if (!isNaN(rightLim)) // Infinity doesnt need to be checked
+                            inBee &= (response < rightLim)
+                    } else {
+                        inBee = 0; // unknown
+                    }
+
+                    console.log("Bucket:", bucket, response, inBee);
+                    if (inBee) { 
+                        BREAK = true; //break
+                    }
+
+                });
+
+                return inBee;
+
+            case "date":
+                var inBee = 1; // Innocent untill proven guilty
+                response = new Date(response); // Convert to date object for comparisons
+                var BREAK = false;
+                buckets.forEach(function(bucket) {
+                    inBee = 1;
+                    if (BREAK) {return;}
+                    var left = bucket.split(',')[0];
+                    var right = bucket.split(',')[1];
+                    if (left[0] === "[") {
+                        console.log("Inclusive Left");
+                        var leftLim = new Date(left.split("[")[1]);
+                        if (!isNaN(leftLim)) // Infinity doesnt need to be checked
+                            inBee &= (response >= leftLim);
+                    } else if (left[0] === "(") {
+                        console.log("Exclusive Left");
+                        var leftLim = new Date(left.split("(")[1]);
+                        if (!isNaN(leftLim)) // Infinity doesnt need to be checked
+                            inBee &= (response > leftLim)
+                    } else {
+                        inBee = 0;
+                    }
+
+                    if (right[right.length - 1] === "]") {
+                        console.log("Inclusive Right");
+                        var rightLim = new Date(right.split("]")[0]);
+                        if (!isNaN(rightLim)) // Infinity doesnt need to be checked
+                            inBee &= (response <= rightLim)
+                    } else if (right[right.length - 1] === ")") {
+                        console.log("Exclusive Right");
+                        var rightLim = new Date(right.split(")")[0]);
+                        if (!isNaN(rightLim)) // Infinity doesnt need to be checked
+                            inBee &= (response < rightLim)
+                    } else {
+                        inBee = 0; // unknown
+                    }
+
+                    console.log("Bucket:", bucket, response, inBee);
+                    if (inBee) { 
+                        BREAK = true; //break
+                    }
+
+                    return true;
+                });
+
+                return inBee;
+            case 'timestamp': 
+                //TODO: This bucket
+                return false;
+            case 'multiple_choice': 
+                var inBee = 0;
+                buckets.forEach(function(bucket) {
+                    inBee |= (bucket === response);
+                    console.log("Bucket:", bucket, response, inBee);
+                });
+                return inBee;
+            default:
+                return false;
+
+        }
+    },
+
+    /* 
+     * Clone linked list node, arrays don't need to be cloned, only next/prev ptrs
+     * @node: Current node to clone
+     * @ids: Dictionay reference of currently cloned nodes, prevents recursion going on forever
+     */
+    cloneNode: function(node, ids) {
+        var self = this;
+        var clone = {
+            next: null,
+            prev: null
+        };
+
+        ids = ids || {};
+
+        Object.keys(node).forEach(function(key) {
+            if (key != 'next' && key != 'prev') {
+                clone[key] = node[key]
+            }
+        });
+
+       // Mutable so next/prev pointers will be visible to all nodes that reference this dictionary
+       ids[node.id] = clone;
+
+       if (node.next) {
+           var next = ids[node.next.id];
+           clone.next = next || self.cloneNode(node.next, ids);
+       }
+
+       if (node.prev) {
+           var prev = ids[node.prev.id];
+           clone.prev = prev || self.cloneNode(node.prev, ids);
+       }
+
+        return clone;
     },
 
     /*
@@ -47186,7 +47696,16 @@ var Application = React.createClass({displayName: "Application",
         // Build new submission
         var answers = []; 
         var self = this;
-        this.props.survey.nodes.forEach(function(question) {
+
+        // Copy active questions into simple list; 
+        var questions = [];
+        var head = this.state.head;
+        while(head) {
+            questions.push(head);
+            head = head.next;
+        }
+
+        questions.forEach(function(question) {
             var responses = survey[question.id] || [];
             responses.forEach(function(response) {
                 // Ignore empty responses
@@ -47205,13 +47724,11 @@ var Application = React.createClass({displayName: "Application",
 
                 // New facilities need to be stored seperatly from survey
                 if (question.type_constraint === 'facility') {
-                    console.log("Facility:", response);
                     if (response.metadata && response.metadata.is_new) {
-                        console.log("Adding new facility data");
+                        console.log("Facility:", response);
                         self.state.trees[question.id]
                             .addFacility(response.response.lat, response.response.lng, response.response);
 
-                        console.log("Storing facility in unsynced array");
                         unsynced_facilities.push({
                             'surveyID': self.props.survey.id,
                             'facilityData': response.response,
@@ -47262,6 +47779,7 @@ var Application = React.createClass({displayName: "Application",
 
         // Wipe location info
         localStorage['location'] = JSON.stringify({});
+
     },
 
     /*
@@ -47311,16 +47829,13 @@ var Application = React.createClass({displayName: "Application",
                     unsynced_submissions.forEach(function(usurvey, i) {
                         if (Date(usurvey.save_time) === Date(survey.save_time)) {
                             idx = i;
-                            return false;
                         }
-                        return true;
                     });
 
                     // Not sure what happened, do not update localStorage
                     if (idx === -1) 
                         return;
 
-                    console.log(idx, unsynced_submissions.length);
                     unsynced_submissions.splice(idx, 1);
 
                     unsynced_surveys[survey.survey_id] = unsynced_submissions;
@@ -47373,9 +47888,7 @@ var Application = React.createClass({displayName: "Application",
                                         }
                                         console.log("Removed:", result);
                                     });
-                                    return false;
                                 }
-                                return true;
                             });
 
                             // What??
@@ -47413,9 +47926,7 @@ var Application = React.createClass({displayName: "Application",
                             var facilityID = facility.facilityData.facility_id;
                             if (ufacilityID === facilityID) {
                                 idx = i;
-                                return false;
                             }
-                            return true;
                         });
 
                         // What??
@@ -47447,8 +47958,6 @@ var Application = React.createClass({displayName: "Application",
         this.setState({
             showDontKnowBox: this.state.showDontKnowBox ? false: true,
             showDontKnow: this.state.showDontKnow,
-            state: this.state.state,
-            nextQuestion: this.state.nextQuestion,
         });
 
         // Force questions to update
@@ -47462,20 +47971,20 @@ var Application = React.createClass({displayName: "Application",
      * Loads splash or submit content if state is either SPLASH/SUBMIT 
      */
     getContent: function() {
-        var questions = this.props.survey.nodes;
-        var nextQuestion = this.state.nextQuestion;
+        var question = this.state.question;
         var state = this.state.state;
         var survey = this.props.survey;
 
         if (state === this.state.states.QUESTION) {
-            var questionType = questions[nextQuestion].type_constraint;
+            var questionID = question.id;
+            var questionType = question.type_constraint;
             switch(questionType) {
                 case 'multiple_choice':
                     return (
                             React.createElement(MultipleChoice, {
                                 ref: "question", 
-                                key: nextQuestion, 
-                                question: questions[nextQuestion], 
+                                key: questionID, 
+                                question: question, 
                                 questionType: questionType, 
                                 language: survey.default_language, 
                                 surveyID: survey.id, 
@@ -47486,8 +47995,8 @@ var Application = React.createClass({displayName: "Application",
                     return (
                             React.createElement(Photo, {
                                 ref: "question", 
-                                key: nextQuestion, 
-                                question: questions[nextQuestion], 
+                                key: questionID, 
+                                question: question, 
                                 questionType: questionType, 
                                 language: survey.default_language, 
                                 surveyID: survey.id, 
@@ -47500,8 +48009,8 @@ var Application = React.createClass({displayName: "Application",
                     return (
                             React.createElement(Location, {
                                 ref: "question", 
-                                key: nextQuestion, 
-                                question: questions[nextQuestion], 
+                                key: questionID, 
+                                question: question, 
                                 questionType: questionType, 
                                 language: survey.default_language, 
                                 surveyID: survey.id, 
@@ -47512,22 +48021,22 @@ var Application = React.createClass({displayName: "Application",
                     return (
                             React.createElement(Facility, {
                                 ref: "question", 
-                                key: nextQuestion, 
-                                question: questions[nextQuestion], 
+                                key: questionID, 
+                                question: question, 
                                 questionType: questionType, 
                                 language: survey.default_language, 
                                 surveyID: survey.id, 
                                 disabled: this.state.showDontKnowBox, 
                                 db: this.state.db, 
-                                tree: this.state.trees[questions[nextQuestion].id]}
+                                tree: this.state.trees[questionID]}
                            )
                        )
                 case 'note':
                     return (
                             React.createElement(Note, {
                                 ref: "question", 
-                                key: nextQuestion, 
-                                question: questions[nextQuestion], 
+                                key: questionID, 
+                                question: question, 
                                 questionType: questionType, 
                                 language: survey.default_language, 
                                 surveyID: survey.id, 
@@ -47538,8 +48047,8 @@ var Application = React.createClass({displayName: "Application",
                     return (
                             React.createElement(Question, {
                                 ref: "question", 
-                                key: nextQuestion, 
-                                question: questions[nextQuestion], 
+                                key: questionID, 
+                                question: question, 
                                 questionType: questionType, 
                                 language: survey.default_language, 
                                 surveyID: survey.id, 
@@ -47569,16 +48078,15 @@ var Application = React.createClass({displayName: "Application",
     },
 
     /*
-     * Load the appropiate title based on the nextQuestion and state
+     * Load the appropiate title based on the question and state
      */
     getTitle: function() {
-        var questions = this.props.survey.nodes;
         var survey = this.props.survey;
-        var nextQuestion = this.state.nextQuestion;
+        var question = this.state.question;
         var state = this.state.state;
 
         if (state === this.state.states.QUESTION) {
-            return questions[nextQuestion].title[survey.default_language] 
+            return question.title[survey.default_language] 
         } else if (state === this.state.states.SUBMIT) {
             return "Ready to Save?"
         } else {
@@ -47587,16 +48095,15 @@ var Application = React.createClass({displayName: "Application",
     },
 
     /*
-     * Load the appropiate 'hint' based on the nextQuestion and state
+     * Load the appropiate 'hint' based on the question and state
      */
     getMessage: function() {
-        var questions = this.props.survey.nodes;
         var survey = this.props.survey;
-        var nextQuestion = this.state.nextQuestion;
+        var question = this.state.question;
         var state = this.state.state;
 
         if (state === this.state.states.QUESTION) {
-            return questions[nextQuestion].hint[survey.default_language] 
+            return question.hint[survey.default_language] 
         } else if (state === this.state.states.SUBMIT) {
             return "If youre satisfied with the answers to all the questions, you can save the survey now."
         } else {
@@ -47621,11 +48128,22 @@ var Application = React.createClass({displayName: "Application",
     render: function() {
         var contentClasses = "content";
         var state = this.state.state;
-        var nextQuestion = this.state.nextQuestion;
-        var questions = this.props.survey.nodes;
+        var question = this.state.question;
+        var questionID = question && question.id || -1;
         var surveyID = this.props.survey.id;
-        var questionID = questions[nextQuestion] && questions[nextQuestion].id 
-            || this.state.state;
+
+        // Get current length of survey and question number
+        var number = -1;
+        var length = 0;
+        var head = this.state.head;
+        while(head) {
+            if (head.id === questionID) {
+                number = length;
+            }
+
+            head = head.next;
+            length++;
+        } 
 
 
         // Alter the height of content based on DontKnow state
@@ -47640,8 +48158,8 @@ var Application = React.createClass({displayName: "Application",
                     React.createElement(Header, {
                         ref: "header", 
                         buttonFunction: this.onPrevButton, 
-                        number: nextQuestion + 1, 
-                        total: questions.length + 1, 
+                        number: number + 1, 
+                        total: length + 1, 
                         db: this.state.db, 
                         surveyID: surveyID, 
                         splash: state === this.state.states.SPLASH}), 
@@ -47668,6 +48186,12 @@ var Application = React.createClass({displayName: "Application",
     }
 });
 
+/*
+ * Entry point for template
+ *
+ * @survey: JSON representation of the survey
+ * @revisit_url: Revisit url, set globally
+ */
 init = function(survey, url) {
     // Set revisit url
     revisit_url = url;
