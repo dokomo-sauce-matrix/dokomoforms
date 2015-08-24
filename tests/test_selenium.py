@@ -286,6 +286,14 @@ class DriverTest(tests.util.DokoFixtureTest):
             element.send_keys(' ')
         self.enter_time(element, hour, minute, am_pm)
 
+    def enter_timestamp_temporary(self, e, y, mo, d, h, mi, am_pm):
+        """Use this temporarily until we use moment.js."""
+        if self.browser == 'chrome':
+            raise unittest.SkipTest('Selenium + Chrome + timestamp == 😢')
+        e.send_keys('{}-{}-{}T{}:{}:00'.format(
+            y, mo, d, h if am_pm.lower().startswith('a') else h + 12, mi
+        ))
+
 
 class TestAuth(DriverTest):
     def test_login(self):
@@ -844,10 +852,8 @@ class TestEnumerate(DriverTest):
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
 
-        self.toggle_online()  # TODO: have a js listener for this
-        # so that the next two lines can go away
-        self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.click(self.drv.find_element_by_class_name('page_nav__prev'))
+        self.toggle_online()
+        time.sleep(1)
 
         self.click(self.drv.find_elements_by_tag_name('button')[0])
 
@@ -2600,7 +2606,7 @@ class TestEnumerate(DriverTest):
         self.get('/enumerate/{}'.format(survey_id))
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.enter_timestamp(
+        self.enter_timestamp_temporary(
             self.drv.find_element_by_tag_name('input'),
             '2015', '01', '02', '01', '00', 'AM'
         )
@@ -2621,7 +2627,7 @@ class TestEnumerate(DriverTest):
             .send_keys(Keys.DELETE)
             .perform()
         )
-        self.enter_timestamp(
+        self.enter_timestamp_temporary(
             self.drv.find_element_by_tag_name('input'),
             '2015', '01', '04', '01', '00', 'AM'
         )
@@ -2642,7 +2648,7 @@ class TestEnumerate(DriverTest):
             .send_keys(Keys.DELETE)
             .perform()
         )
-        self.enter_timestamp(
+        self.enter_timestamp_temporary(
             self.drv.find_element_by_tag_name('input'),
             '2015', '01', '01', '01', '00', 'AM'
         )
