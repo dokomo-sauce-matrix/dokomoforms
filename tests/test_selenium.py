@@ -72,6 +72,8 @@ def report_success_status(method):
             print(
                 '2nd attempt {}'.format(self._testMethodName), file=sys.stderr
             )
+            self.drv.quit()
+            self.setUp()
             return attempt_a_sauce_test(self, method, *args, **kwargs)
     return set_passed
 
@@ -105,7 +107,11 @@ class DriverTest(tests.util.DokoFixtureTest):
             )
         configs = browser_config.split(':')
         self.browser, self.version, self.platform, *other = configs
-        caps = {'browserName': self.browser, 'platform': self.platform}
+        caps = {
+            'browserName': self.browser,
+            'platform': self.platform,
+            'idleTimeout': 180,
+        }
         if self.browser in {'android', 'iPhone'}:
             caps['deviceName'] = other[0]
             caps['device-orientation'] = 'portrait'
@@ -134,12 +140,13 @@ class DriverTest(tests.util.DokoFixtureTest):
             browser_profile = f_profile
         elif self.browser == 'chrome':
             caps['disable-user-media-security'] = True
+        self.driver_config = {
+            'desired_capabilities': caps,
+            'command_executor': cmd_executor,
+            'browser_profile': browser_profile,
+        }
         try:
-            self.drv = webdriver.Remote(
-                desired_capabilities=caps,
-                command_executor=cmd_executor,
-                browser_profile=browser_profile,
-            )
+            self.drv = webdriver.Remote(**self.driver_config)
         except urllib.error.URLError:
             self.fail(
                 'Sauce Connect failure. Did you start Sauce Connect?'
@@ -258,7 +265,7 @@ class DriverTest(tests.util.DokoFixtureTest):
         """Use this temporarily until we use moment.js."""
         if self.browser == 'chrome':
             raise unittest.SkipTest('Selenium + Chrome + timestamp == 😢')
-        e.send_keys('{}-{}-{}T{}:{}:00'.format(
+        e.send_keys('{}-{}-{}T{}:{}:00Z'.format(
             y, mo, d, h if am_pm.lower().startswith('a') else h + 12, mi
         ))
 
@@ -2570,8 +2577,8 @@ class TestEnumerate(DriverTest):
     def test_timestamp_buckets(self):
         survey_id = self.survey_with_branch(
             'timestamp',
-            '(2015-01-01T1:00:00, 2015-01-03:1:00:00)',
-            '[2015-01-04T1:00:00, 2015-01-05T1:00:00]'
+            '(2015-01-01T1:00:00Z, 2015-01-03:1:00:00Z)',
+            '[2015-01-04T1:00:00Z, 2015-01-05T1:00:00Z]'
         )
 
         self.get('/enumerate/{}'.format(survey_id))
@@ -2634,8 +2641,8 @@ class TestEnumerate(DriverTest):
     def test_timestamp_buckets_open_ranges(self):
         survey_id = self.survey_with_branch(
             'timestamp',
-            '(, 2015-01-01T1:00:00)',
-            '[2015-01-10T1:00:00,]'
+            '(, 2015-01-01T1:00:00Z)',
+            '[2015-01-10T1:00:00Z,]'
         )
 
         self.get('/enumerate/{}'.format(survey_id))
