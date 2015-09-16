@@ -114,6 +114,11 @@ sa.event.listen(
 )
 
 
+UUID_REGEX = (
+    '[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}'
+)
+
+
 def jsonify(obj, *, raise_exception=False) -> object:
     """Convert the given object to something JSON can handle."""
     if isinstance(obj, Base):
@@ -185,10 +190,11 @@ def create_engine(echo: bool=None,
         # This causes duplicate log messages, but I can't figure out how to get
         # the same level of logging otherwise...
         echo = 'debug' if options.debug else False
-    connection_string = 'postgresql+psycopg2://{}:{}@{}/{}'.format(
+    connection_string = 'postgresql+psycopg2://{}:{}@{}:{}/{}'.format(
         options.db_user,
         options.db_password,
         options.db_host,
+        options.db_port,
         options.db_database,
     )
     pool_size = pool_size or options.pool_size

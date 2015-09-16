@@ -27,17 +27,13 @@ class User(Base):
     )
     role = sa.Column(
         sa.Enum(
-            'enumerator', 'creator', name='user_roles', inherit_schema=True
+            'enumerator', 'administrator',
+            name='user_roles', inherit_schema=True
         ),
         nullable=False,
     )
-    default_language = sa.Column(
-        pg.TEXT,
-        sa.CheckConstraint(
-            "default_language != ''", name='non_empty_default_language'
-        ),
-        nullable=False,
-        server_default='English',
+    preferences = util.json_column(
+        'preferences', default='{"default_language": "English"}'
     )
     last_update_time = util.last_update_time()
 
@@ -46,6 +42,13 @@ class User(Base):
         'polymorphic_on': role,
     }
 
+    __table_args__ = (
+        sa.CheckConstraint(
+            "((preferences->>'default_language')) IS NOT NULL",
+            name='must_specify_default_language'
+        ),
+    )
+
     def _asdict(self) -> OrderedDict:
         return OrderedDict((
             ('id', self.id),
@@ -53,21 +56,21 @@ class User(Base):
             ('name', self.name),
             ('emails', [email.address for email in self.emails]),
             ('role', self.role),
-            ('default_language', self.default_language),
-            ('allowed_surveys', self.allowed_surveys),
+            ('preferences', self.preferences),
+            ('allowed_surveys', [s.id for s in self.allowed_surveys]),
             ('last_update_time', self.last_update_time),
         ))
 
 
-class SurveyCreator(User):
+class Administrator(User):
 
-    """A User who can create Surveys.
+    """A User who can create Surveys and add Users.
 
-    Regular users can answer surveys, but only SurveyCreator instances can
+    Regular users can answer surveys, but only Administrator instances can
     create surveys.
     """
 
-    __tablename__ = 'survey_creator'
+    __tablename__ = 'administrator'
 
     id = util.pk('auth_user.id')
     surveys = relationship(
@@ -84,18 +87,24 @@ class SurveyCreator(User):
         server_default=current_timestamp(),
     )
 
-    __mapper_args__ = {'polymorphic_identity': 'creator'}
+    __mapper_args__ = {'polymorphic_identity': 'administrator'}
 
     def _asdict(self) -> OrderedDict:
         result = super()._asdict()
-        result['surveys'] = [
-            OrderedDict((
-                ('survey_id', survey.id),
-                ('survey_title', survey.title),
-            )) for survey in self.surveys
-        ]
+        result['surveys'] = [s.id for s in self.surveys]
         result['token_expiration'] = self.token_expiration
         return result
+
+
+def construct_user(*, role: str, **kwargs):
+    """Construct either an enumerator or an administrator."""
+    if role == 'enumerator':
+        user_constructor = User
+    elif role == 'administrator':
+        user_constructor = Administrator
+    else:
+        raise TypeError
+    return user_constructor(**kwargs)
 
 
 class Email(Base):

@@ -4,6 +4,7 @@ python:
 cache:
   directories:
     - $HOME/.cache/pip
+    - node_modules
 env:
   global:
     - SAUCE_CONNECT=true
@@ -54,8 +55,11 @@ before_install:
 before_script:
   - psql -c 'create database doko;' -U postgres
   - head -c 24 /dev/urandom > cookie_secret
-  - ./tests/selenium_webapp.py > /dev/null 2>&1 &
+  - nvm install iojs
+  - npm install
+  - ./tests/python/selenium_webapp.py &>/dev/null &
   - sleep 2
+  - node_modules/gulp/bin/gulp.js dev-build
 
 script:
-  - python -m unittest tests.test_selenium
+  - python -m unittest tests.python.test_selenium

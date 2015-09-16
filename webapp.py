@@ -15,6 +15,7 @@ import subprocess
 import sys
 from time import sleep
 import logging
+import mimetypes
 
 from sqlalchemy import DDL
 
@@ -32,9 +33,10 @@ if __name__ == '__main__':  # pragma: no cover
     parse_options()
 
 import dokomoforms.handlers as handlers
-from dokomoforms.models import create_engine, Base
-from dokomoforms.api import (
-    SurveyResource, SubmissionResource, PhotoResource, NodeResource
+from dokomoforms.models import create_engine, Base, UUID_REGEX
+from dokomoforms.handlers.api import (
+    SurveyResource, SubmissionResource, PhotoResource, NodeResource,
+    UserResource
 )
 
 
@@ -42,9 +44,9 @@ _pwd = os.path.dirname(__file__)
 bold = '\033[1m'
 green = '\033[92m'
 
-UUID_REGEX = (
-    '[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}'
-)
+# Add mimetypes
+mimetypes.add_type("application/x-font-woff", ".woff")
+mimetypes.add_type("application/octet-stream", ".ttf")
 
 
 def modify_text(text: str, modifier: str) -> str:
@@ -144,7 +146,6 @@ class Application(tornado.web.Application):
 
             # Views
             # * Admin views
-            url(r'/view/?', handlers.ViewHandler, name='admin_view'),
             url(
                 r'/view/({})/?'.format(UUID_REGEX),
                 handlers.ViewSurveyHandler,
@@ -162,16 +163,19 @@ class Application(tornado.web.Application):
             ),
 
             url(
-                r'/visualize/({})/?'.format(UUID_REGEX),
-                handlers.VisualizationHandler,
-                name='admin_visualize',
+                r'/view/user-administration/?',
+                handlers.ViewUserAdminHandler,
+                name='admin_user_view',
             ),
 
             # * Regular views
-            # TODO: use survey title?? instead of id
             url(
                 r'/enumerate/({})/?'.format(UUID_REGEX), handlers.Enumerate,
                 name='enumerate'
+            ),
+            url(
+                r'/enumerate/(.+)/?', handlers.EnumerateTitle,
+                name='enumerate_title'
             ),
 
             # API
@@ -209,6 +213,7 @@ class Application(tornado.web.Application):
                 '/submissions/({uuid})/?', SubmissionResource.as_detail(),
                 name='submission'
             ),
+            # * * Photos
             api_url('/photos/?', PhotoResource.as_list(), name='photos'),
             api_url(
                 '/photos/({uuid})/?', PhotoResource.as_detail(), name='photo'
@@ -221,22 +226,15 @@ class Application(tornado.web.Application):
             ),
 
             # * Users
+            api_url('/users/?', UserResource.as_list(), name='users'),
             api_url(
-                '/user/generate-api-token/?', handlers.GenerateToken,
+                '/users/({uuid})/?', UserResource.as_detail(), name='user'
+            ),
+            api_url(
+                '/users/generate-api-token/?', handlers.GenerateToken,
                 name='generate_token'
             ),
         ]
-
-        # Debug
-        if options.debug:
-            urls += [
-                url(r'/debug/create/(.+)/?',
-                    handlers.DebugUserCreationHandler),
-                url(r'/debug/login/(.+)/?', handlers.DebugLoginHandler),
-                url(r'/debug/logout/?', handlers.DebugLogoutHandler),
-                url(r'/debug/persona_verify/?', handlers.DebugPersonaHandler),
-                url(r'/debug/facilities/?', handlers.DebugRevisitHandler),
-            ]
 
         settings = {
             'template_path': os.path.join(_pwd, 'dokomoforms/templates'),
@@ -245,9 +243,22 @@ class Application(tornado.web.Application):
             'xsrf_cookies': True,
             'cookie_secret': get_cookie_secret(),
             'login_url': '/',
-            'debug': options.dev or options.debug,
-            'autoreload': options.dev or options.autoreload,
+            'debug': options.debug
         }
+
+        # Debug
+        if settings['debug']:  # pragma: no cover
+            urls += [
+                url(r'/debug/create/(.+)/?',
+                    handlers.DebugUserCreationHandler),
+                url(r'/debug/login/(.+)/?', handlers.DebugLoginHandler),
+                url(r'/debug/logout/?', handlers.DebugLogoutHandler),
+                url(r'/debug/persona_verify/?', handlers.DebugPersonaHandler),
+                url(r'/debug/facilities/?', handlers.DebugRevisitHandler),
+                url(r'/debug/toggle_facilities/?',
+                    handlers.DebugToggleRevisitHandler),
+            ]
+
         super().__init__(urls, **settings)
 
         # Database setup

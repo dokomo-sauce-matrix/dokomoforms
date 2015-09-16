@@ -1,8 +1,9 @@
 """All the models used in Dokomo Forms."""
 from dokomoforms.models.util import (
-    Base, create_engine, jsonify, get_model, ModelJSONEncoder
+    Base, create_engine, jsonify, get_model, ModelJSONEncoder,
+    UUID_REGEX
 )
-from dokomoforms.models.user import User, SurveyCreator, Email
+from dokomoforms.models.user import User, Administrator, Email, construct_user
 from dokomoforms.models.node import (
     Node, Question, construct_node, NODE_TYPES, node_type_enum,
     Note,
@@ -34,8 +35,9 @@ from dokomoforms.models.column_properties import (
 __all__ = (
     # Util
     'Base', 'create_engine', 'jsonify', 'get_model', 'ModelJSONEncoder',
+    'UUID_REGEX',
     # User
-    'User', 'SurveyCreator', 'Email',
+    'User', 'Administrator', 'Email', 'construct_user',
     # Node
     'Node', 'Question', 'construct_node', 'NODE_TYPES', 'node_type_enum',
     'Note',
