@@ -3253,17 +3253,25 @@ class TestEnumerate(DriverTest):
             1
         )
 
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
+        # For some reason the Ctrl+A approach doesn't work on Chrome...
+        if self.browser == 'chrome':
+            (
+                self.drv
+                .find_element_by_tag_name('input')
+                .send_keys(Keys.LEFT, Keys.LEFT)
             )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys(Keys.DELETE)
-            .perform()
-        )
+        else:
+            (
+                ActionChains(self.drv)
+                .key_down(
+                    self.control_key,
+                    self.drv.find_element_by_tag_name('input')
+                )
+                .send_keys('a')
+                .key_up(self.control_key)
+                .send_keys(Keys.DELETE)
+                .perform()
+            )
         self.enter_date(
             self.drv.find_element_by_tag_name('input'),
             '2015', '09', '02'
@@ -3278,17 +3286,24 @@ class TestEnumerate(DriverTest):
             0
         )
 
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
+        if self.browser == 'chrome':
+            (
+                self.drv
+                .find_element_by_tag_name('input')
+                .send_keys(Keys.LEFT, Keys.LEFT)
             )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys(Keys.DELETE)
-            .perform()
-        )
+        else:
+            (
+                ActionChains(self.drv)
+                .key_down(
+                    self.control_key,
+                    self.drv.find_element_by_tag_name('input')
+                )
+                .send_keys('a')
+                .key_up(self.control_key)
+                .send_keys(Keys.DELETE)
+                .perform()
+            )
         self.enter_date(
             self.drv.find_element_by_tag_name('input'),
             '2015', '09', '12'
