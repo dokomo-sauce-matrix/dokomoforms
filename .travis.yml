@@ -55,7 +55,7 @@ before_install:
 before_script:
   - psql -c 'create database doko;' -U postgres
   - head -c 24 /dev/urandom > cookie_secret
-  - nvm install iojs
+  - nvm install stable
   - npm install
   - ./tests/python/selenium_webapp.py &>/dev/null &
   - sleep 2

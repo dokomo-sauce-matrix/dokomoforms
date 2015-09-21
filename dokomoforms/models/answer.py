@@ -21,6 +21,10 @@ from dokomoforms.exc import (
 )
 
 
+def _is_response(possible_response):
+    return possible_response[1] is not None
+
+
 class Answer(Base):
 
     """An Answer is a response to a SurveyNode.
@@ -34,6 +38,8 @@ class Answer(Base):
     id = util.pk()
     answer_number = sa.Column(sa.Integer, nullable=False)
     submission_id = sa.Column(pg.UUID, nullable=False)
+    # save_time is here so that AnswerableSurveyNode can have a list of
+    # answers to that node ordered by save time of the submission
     save_time = sa.Column(pg.TIMESTAMP(timezone=True), nullable=False)
     survey_id = sa.Column(pg.UUID, nullable=False)
     survey_containing_id = sa.Column(pg.UUID, nullable=False)
@@ -105,16 +111,12 @@ class Answer(Base):
             'response': <one of self.answer, self.other, self.dont_know>
         }
         """
-        possible_responses = [
+        possible_resps = [
             ('answer', self.main_answer),
             ('other', self.other),
             ('dont_know', self.dont_know),
         ]
-        response_type, response = next(
-            (possible_response, response)
-            for possible_response, response in possible_responses
-            if response is not None
-        )
+        response_type, response = next(filter(_is_response, possible_resps))
         if response_type == 'answer':
             if self.type_constraint == 'multiple_choice':
                 response = {

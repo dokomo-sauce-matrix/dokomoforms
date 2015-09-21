@@ -1701,6 +1701,16 @@ class TestSurveyApi(DokoHTTPTest):
         self.assertEqual(
             response.headers['Content-Type'], 'text/csv; charset=UTF-8'
         )
+        cd = response.headers['Content-Disposition']
+        full_filename = cd.split()[1]
+        filename, extension = full_filename[9:-4], full_filename[-3:]
+        self.assertEqual(extension, 'csv')
+        first_chunk, rest = filename.split('_', 1)
+        self.assertEqual(first_chunk, 'survey')
+        chunks = rest.rsplit('_', 2)
+        self.assertEqual(len(chunks), 3)
+        self.assertEqual(chunks[0], 'single_survey')
+        self.assertEqual(chunks[1], 'submissions')
 
         with closing(StringIO(response.body.decode())) as csv_data:
             dr = DictReader(csv_data)
@@ -1709,6 +1719,33 @@ class TestSurveyApi(DokoHTTPTest):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['main_answer'], '3')
         self.assertEqual(data[0]['response'], '3')
+
+    def test_csv_filename_with_modifiers(self):
+        survey_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
+        # url to test
+        url = '{}/surveys/{}/submissions?format=csv&limit=1'.format(
+            self.api_root, survey_id
+        )
+        # http method
+        method = 'GET'
+        # make request
+        response = self.fetch(url, method=method)
+
+        self.assertEqual(response.code, 200, msg=response.body)
+        self.assertEqual(
+            response.headers['Content-Type'], 'text/csv; charset=UTF-8'
+        )
+        cd = response.headers['Content-Disposition']
+        full_filename = cd.split()[1]
+        filename, extension = full_filename[9:-4], full_filename[-3:]
+        self.assertEqual(extension, 'csv')
+        first_chunk, rest = filename.split('_', 1)
+        self.assertEqual(first_chunk, 'survey')
+        chunks = rest.rsplit('_', 3)
+        self.assertEqual(len(chunks), 4)
+        self.assertEqual(chunks[0], 'single_survey')
+        self.assertEqual(chunks[1], 'submissions')
+        self.assertEqual(chunks[3], 'modified')
 
     def test_get_stats_for_survey(self):
         survey_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
@@ -2095,6 +2132,13 @@ class TestSubmissionApi(DokoHTTPTest):
         self.assertEqual(
             response.headers['Content-Type'], 'text/csv; charset=UTF-8'
         )
+        cd = response.headers['Content-Disposition']
+        full_filename = cd.split()[1]
+        filename, extension = full_filename[9:-4], full_filename[-3:]
+        self.assertEqual(extension, 'csv')
+        chunks = filename.split('_')
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0], 'submissions')
 
         with closing(StringIO(response.body.decode())) as csv_data:
             dr = DictReader(csv_data)
@@ -2154,7 +2198,7 @@ class TestSubmissionApi(DokoHTTPTest):
         self.assertEqual(len(submissions), 1)
 
     def test_get_single_submission(self):
-        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
+        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970924'
         # url to test
         url = self.api_root + '/submissions/' + submission_id
         # http method (just for clarity)
@@ -2164,7 +2208,8 @@ class TestSubmissionApi(DokoHTTPTest):
 
         submission_dict = json_decode(response.body)
 
-        self.assertTrue('save_time' in submission_dict)
+        self.assertTrue('save_time' in submission_dict, msg=submission_dict)
+        self.assertTrue('start_time' in submission_dict)
         self.assertTrue('deleted' in submission_dict)
         self.assertTrue('id' in submission_dict)
         self.assertTrue('submitter_email' in submission_dict)
@@ -2177,7 +2222,7 @@ class TestSubmissionApi(DokoHTTPTest):
         self.assertFalse("error" in submission_dict)
 
     def test_get_single_submission_csv_excel_dialect(self):
-        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
+        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970924'
         # url to test
         url = self.api_root + '/submissions/' + submission_id + '?format=csv'
         # http method (just for clarity)
@@ -2193,7 +2238,7 @@ class TestSubmissionApi(DokoHTTPTest):
         self.assertIn('\r\n', response.body.decode())
 
     def test_get_single_submission_csv_unix_dialect(self):
-        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
+        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970924'
         # url to test
         url = self.api_root + '/submissions/' + submission_id
         url += '?format=csv&dialect=unix'
@@ -2210,7 +2255,7 @@ class TestSubmissionApi(DokoHTTPTest):
         self.assertNotIn('\r\n', response.body.decode())
 
     def test_get_single_submission_csv_integer(self):
-        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
+        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970924'
         # url to test
         url = self.api_root + '/submissions/' + submission_id + '?format=csv'
         # http method (just for clarity)
@@ -2222,6 +2267,14 @@ class TestSubmissionApi(DokoHTTPTest):
         self.assertEqual(
             response.headers['Content-Type'], 'text/csv; charset=UTF-8'
         )
+        cd = response.headers['Content-Disposition']
+        full_filename = cd.split()[1]
+        filename, extension = full_filename[9:-4], full_filename[-3:]
+        self.assertEqual(extension, 'csv')
+        chunks = filename.split('_')
+        self.assertEqual(len(chunks), 3)
+        self.assertEqual(chunks[0], 'submission')
+        self.assertEqual(chunks[1], submission_id)
 
         with closing(StringIO(response.body.decode())) as csv_data:
             dr = DictReader(csv_data)
@@ -2419,7 +2472,10 @@ class TestSubmissionApi(DokoHTTPTest):
         # make request
         submit_url = self.api_root + '/surveys/' + photo_survey.id + '/submit'
         sub_r = self.fetch(submit_url, method='POST', body=json_encode(body))
-        submission_id = json_decode(sub_r.body)['id']
+        try:
+            submission_id = json_decode(sub_r.body)['id']
+        except KeyError:
+            self.fail(json_decode(sub_r.body))
         photo_url = self.api_root + '/photos'
         photo_path = os.path.join(
             os.path.abspath('.'),
@@ -2804,6 +2860,7 @@ class TestSubmissionApi(DokoHTTPTest):
         submission_dict = json_decode(response.body)
 
         self.assertTrue('save_time' in submission_dict)
+        self.assertTrue('start_time' in submission_dict)
         self.assertTrue('deleted' in submission_dict)
         self.assertTrue('id' in submission_dict)
         self.assertTrue('submitter_email' in submission_dict)
@@ -3101,6 +3158,7 @@ class TestSubmissionApi(DokoHTTPTest):
             "survey_id": "b0816b52-204f-41d4-aaf0-ac6ae2970923",
             "submitter_name": "regular",
             "submission_type": "unauthenticated",
+            "start_time": "2015-09-17T20:42:20",
             "answers": [
                 {
                     "survey_node_id": "60e56824-910c-47aa-b5c0-71493277b43f",
@@ -3116,6 +3174,7 @@ class TestSubmissionApi(DokoHTTPTest):
         submission_dict = json_decode(response.body)
 
         self.assertTrue('save_time' in submission_dict)
+        self.assertTrue('start_time' in submission_dict)
         self.assertTrue('deleted' in submission_dict)
         self.assertTrue('id' in submission_dict)
         self.assertTrue('submitter_email' in submission_dict)
@@ -3127,6 +3186,12 @@ class TestSubmissionApi(DokoHTTPTest):
 
         self.assertEqual(len(submission_dict['answers']), 1)
 
+        self.assertTrue(
+            submission_dict['start_time'].startswith(
+                "2015-09-17T20:42:20"
+            ),
+            msg=submission_dict['start_time']
+        )
         self.assertEqual(
             submission_dict['answers'][0]['response'],
             3
@@ -4930,7 +4995,7 @@ class TestSubmissionApi(DokoHTTPTest):
     #    self.fail("Not yet implemented.")
 
     def test_delete_submission(self):
-        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
+        submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970924'
         # url to test
         url = self.api_root + '/submissions/' + submission_id
         # http method
