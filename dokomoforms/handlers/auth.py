@@ -7,7 +7,7 @@ import uuid
 
 from sqlalchemy.orm.exc import NoResultFound
 
-from tornado.escape import json_decode, json_encode
+from tornado.escape import json_decode
 import tornado.concurrent
 import tornado.web
 import tornado.gen
@@ -16,7 +16,7 @@ import tornado.httpclient
 from passlib.hash import bcrypt_sha256
 
 from dokomoforms.options import options
-from dokomoforms.handlers.util import BaseHandler
+from dokomoforms.handlers.util import BaseHandler, authenticated_admin
 from dokomoforms.models import User, Email
 
 
@@ -92,11 +92,7 @@ class Login(BaseHandler):
         }
         if options.https:
             cookie_options['secure'] = True
-        self.set_secure_cookie(
-            'user',
-            json_encode({'user_id': user.id, 'user_name': user.name}),
-            **cookie_options
-        )
+        self.set_secure_cookie('user', user.id, **cookie_options)
         self.write({'email': data['email']})
         self.finish()
 
@@ -118,7 +114,7 @@ class GenerateToken(BaseHandler):  # We should probably do this in JS
 
     """GET your token here. GETting twice resets the token."""
 
-    @tornado.web.authenticated
+    @authenticated_admin
     def get(self):
         """Set a new token for the logged in user and return the token."""
         token = uuid.uuid4().hex
@@ -130,3 +126,13 @@ class GenerateToken(BaseHandler):  # We should probably do this in JS
             ('token', token),
             ('expires_on', user.token_expiration.isoformat()),
         )))
+
+
+class CheckLoginStatus(BaseHandler):
+
+    """An endpoint for the application to check login status."""
+
+    @tornado.web.authenticated
+    def post(self):
+        """2xx good, 5xx bad."""
+        self.finish()

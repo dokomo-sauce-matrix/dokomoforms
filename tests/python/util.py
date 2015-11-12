@@ -11,12 +11,13 @@ from urllib.parse import urlencode
 
 from tornado.testing import AsyncHTTPTestCase, LogTrapTestCase
 from tornado.web import RequestHandler
-from tornado.escape import json_encode
 
 from dokomoforms.options import inject_options, parse_options
 
-inject_options(schema='doko_test', debug='True')
+inject_options(schema='doko_test')
 parse_options()
+
+from dokomoforms.options import options
 
 from sqlalchemy import DDL
 from sqlalchemy.orm import sessionmaker
@@ -25,7 +26,7 @@ from dokomoforms.handlers.util import BaseHandler
 from webapp import Application
 from tests.python.fixtures import load_fixtures, unload_fixtures
 
-engine = create_engine(echo=False, pool_size=0, max_overflow=-1)
+engine = create_engine(pool_size=0, max_overflow=-1)
 Session = sessionmaker()
 
 
@@ -141,7 +142,9 @@ class DokoHTTPTest(DokoFixtureTest, LogTrapTestCase, AsyncHTTPTestCase):
 
     def get_app(self):
         """Return an instance of the application to be tested."""
-        self.app = Application(self.session)
+        options.debug = True
+        options.demo = False
+        self.app = Application(self.session, options=options)
         return self.app
 
     def append_query_params(self, url, params_dict):
@@ -157,10 +160,7 @@ class DokoHTTPTest(DokoFixtureTest, LogTrapTestCase, AsyncHTTPTestCase):
 
     def fetch(self, *args,
               _disable_xsrf: bool=True,
-              _logged_in_user: dict={
-                  'user_id': 'b7becd02-1a3f-4c1d-a0e1-286ba121aef4',
-                  'user_name': 'test_user',
-              },
+              _logged_in_user: str='b7becd02-1a3f-4c1d-a0e1-286ba121aef4',
               **kwargs):
         """Fetch, circumventing XSRF cookies and logging in (by default)."""
         patch_xsrf = dummy_patch()
@@ -169,7 +169,6 @@ class DokoHTTPTest(DokoFixtureTest, LogTrapTestCase, AsyncHTTPTestCase):
 
         patch_login = dummy_patch()
         if _logged_in_user:
-            _logged_in_user = json_encode(_logged_in_user)
             patch_login = patch.object(BaseHandler, '_current_user_cookie')
 
         with patch_xsrf as x, patch_login as l:

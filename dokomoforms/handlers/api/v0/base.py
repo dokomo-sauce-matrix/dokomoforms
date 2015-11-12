@@ -2,6 +2,7 @@
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 import datetime
+import logging
 from time import localtime
 
 from passlib.hash import bcrypt_sha256
@@ -16,8 +17,9 @@ from sqlalchemy.orm.exc import NoResultFound
 
 import tornado.web
 
-from dokomoforms.handlers.api.serializer import ModelJSONSerializer
-from dokomoforms.handlers.api.util import filename_safe
+from dokomoforms.exc import SurveyAccessForbidden
+from dokomoforms.handlers.api.v0.serializer import ModelJSONSerializer
+from dokomoforms.handlers.api.v0.util import filename_safe
 from dokomoforms.handlers.util import BaseHandler, BaseAPIHandler
 from dokomoforms.models import Administrator, Email, Survey, Submission
 from dokomoforms.models.survey import (
@@ -66,12 +68,31 @@ class BaseResource(TornadoResource, metaclass=ABCMeta):
     @property
     def current_user_model(self):
         """The handler's current_user_model."""
-        return self.r_handler.current_user_model
+        logged_in_user = self.r_handler.current_user_model
+        if logged_in_user:
+            return logged_in_user
+        try:
+            email = self.r_handler.request.headers['Email']
+        except KeyError:
+            return None
+        try:
+            return (
+                self.session
+                .query(Administrator)
+                .join(Email)
+                .filter(Email.address == email)
+                .one()
+            )
+        except NoResultFound:
+            return None
 
     @property
     def current_user(self):
         """The handler's current_user."""
-        return self.r_handler.current_user
+        user = self.current_user_model
+        if user:
+            return user.name
+        return None
 
     @property
     def content_type(self):
@@ -157,10 +178,15 @@ class BaseResource(TornadoResource, metaclass=ABCMeta):
             restless_error = exc.HttpError(err.log_message)
             restless_error.status = err.status_code
             err = restless_error
+        elif isinstance(err, SurveyAccessForbidden):
+            restless_error = exc.HttpError(str(err))
+            restless_error.status = 403
+            err = restless_error
         elif isinstance(err, NoResultFound):
             err = exc.NotFound()
         elif isinstance(err, understood):
             err = exc.BadRequest(err)
+        logging.exception(err)
         return super().handle_error(err)
 
     def wrap_list_response(self, data):
@@ -193,10 +219,16 @@ class BaseResource(TornadoResource, metaclass=ABCMeta):
     def _check_xsrf_cookie(self):
         return BaseHandler.check_xsrf_cookie(self.r_handler)
 
-    def is_authenticated(self):
+    def is_authenticated(self, admin_only=True):
         """Return whether the request has been authenticated."""
-        # A logged-in user has already authenticated.
+        # A logged-in user (or specifically Administrator) is authenticated.
         if self.r_handler.current_user is not None:
+            not_an_admin_but_should_be = (
+                admin_only and
+                self.r_handler.current_user_model.role != 'administrator'
+            )
+            if not_an_admin_but_should_be:
+                return False
             if self.request_method() not in {'GET', 'HEAD', 'OPTIONS'}:
                 self._check_xsrf_cookie()
             return True

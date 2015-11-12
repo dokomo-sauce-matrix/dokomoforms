@@ -2,10 +2,12 @@
 var React = require('react'),
     $ = require('jquery'),
     moment = require('moment'),
-    PouchDB = require('pouchdb/dist/pouchdb.min');
+    PouchDB = require('pouchdb'),
+    ps = require('../../common/js/pubsub'),
+    cookies = require('../../common/js/cookies');
 
 // pouch plugin
-PouchDB.plugin(require('pouchdb-upsert'));
+// PouchDB.plugin(require('pouchdb-upsert'));
 
 // components
 var Title = require('./components/baseComponents/Title'),
@@ -19,6 +21,7 @@ var Title = require('./components/baseComponents/Title'),
     Facility = require('./components/Facility'),
     Submit = require('./components/Submit'),
     Splash = require('./components/Splash'),
+    Loading = require('./components/Loading'),
 
     // api services
     PhotoAPI = require('./api/PhotoAPI'),
@@ -35,6 +38,10 @@ var Application = React.createClass({
         var surveyDB = new PouchDB(this.props.survey.id, {
             'auto_compaction': true
         });
+
+        // loading state, unless there are no facility nodes
+        var init_state = 0;
+
         window.surveyDB = surveyDB;
 
         // Build initial linked list
@@ -58,8 +65,30 @@ var Application = React.createClass({
 
         });
 
-        // Recursively construct trees
-        this.buildTrees(questions, trees);
+        this.questions = questions;
+
+        // // Recursively construct trees
+        // var has_facility_node = this.buildTrees(questions, trees);
+
+        // if (!has_facility_node) {
+        //     init_state = 1;
+        // }
+
+        // set default lang -- use user pref stored in localStorage,
+        // falling back to survey default if the user pref is not available
+        // for this survey
+        var language = this.props.survey.default_language;
+        if (localStorage['default_language']
+            && this.props.survey.languages.indexOf(localStorage['default_language']) !== -1) {
+            language = localStorage['default_language'];
+        }
+
+        // user stuff
+        var logged_in = window.CURRENT_USER !== undefined;
+        if (logged_in) {
+            localStorage['submitter_name'] = window.CURRENT_USER.name;
+            localStorage['submitter_email'] = window.CURRENT_USER.email;
+        }
 
         return {
             showDontKnow: false,
@@ -68,14 +97,66 @@ var Application = React.createClass({
             question: null,
             headStack: [], //XXX Stack of linked list heads
             states: {
+                LOADING: 0,
                 SPLASH: 1,
                 QUESTION: 2,
                 SUBMIT: 3
             },
-            state: 1,
+            language: language,
+            state: init_state,
             trees: trees,
+            loggedIn: logged_in,
+            hasFacilities: null,
             db: surveyDB
         };
+    },
+
+    componentWillMount: function() {
+        var self = this;
+
+        ps.subscribe('loading:progress', function() {
+            // unused as of this moment, since we can't know the content-length
+            // due to gzipping.
+        });
+
+        ps.subscribe('loading:complete', function() {
+            console.log('LOADING COMPLETE');
+            self.setState({
+                state: 1
+            });
+        });
+
+        ps.subscribe('settings:language_changed', function(e, lang) {
+            self.setState({
+                language: lang
+            });
+            localStorage['default_language'] = lang;
+        });
+
+        // handle revisit:reload_facilities event by flushing existing facilities
+        // and refreshing page.
+        ps.subscribe('revisit:reload_facilities', function() {
+            localStorage.removeItem('facilities');
+            window.location.reload();
+        });
+    },
+
+    componentDidMount: function() {
+        // Recursively construct trees
+        var has_facility_node = this.buildTrees(this.questions, this.state.trees),
+            state = has_facility_node ? 0 : 1;
+
+        if (!has_facility_node) {
+            this.setState({
+                state: 1
+            });
+        } else {
+            this.setState({
+                hasFacilities: true
+            });
+        }
+
+
     },
 
     /*
@@ -89,11 +170,13 @@ var Application = React.createClass({
      * i.e: Multiple trees with same bounds do not increase memory usage (network usage does increase though)
      */
     buildTrees: function(questions, trees) {
-        var self = this;
+        var self = this,
+            has_facility_node = false;
         questions = questions || [];
 
         questions.forEach(function(node) {
             if (node.type_constraint === 'facility') {
+                has_facility_node = true;
                 trees[node.id] = new FacilityTree(
                     parseFloat(node.logic.nlat),
                     parseFloat(node.logic.wlng),
@@ -106,10 +189,12 @@ var Application = React.createClass({
 
             if (node.sub_surveys) {
                 node.sub_surveys.forEach(function(subs) {
-                    self.buildTrees(subs.nodes, trees);
+                    has_facility_node = self.buildTrees(subs.nodes, trees);
                 });
             }
         });
+
+        return has_facility_node;
     },
 
     /**
@@ -131,31 +216,46 @@ var Application = React.createClass({
      * Uses refs! (Could be removed)
      */
     onNextButton: function() {
-        var self = this;
-        var surveyID = this.props.survey.id;
-        var currentState = this.state.state;
-        var currentQuestion = this.state.question;
+        var self = this,
+            surveyID = this.props.survey.id,
+            currentState = this.state.state,
+            currentQuestion = this.state.question;
 
         // Set up next state
-        var nextQuestion = null;
-        var showDontKnow = false;
-        var showDontKnowBox = false;
-        var state = this.state.states.SPLASH;
-        var head = this.state.head;
-        var headStack = this.state.headStack;
+        var nextQuestion = null,
+            showDontKnow = false,
+            showDontKnowBox = false,
+            state = this.state.states.SPLASH,
+            head = this.state.head,
+            headStack = this.state.headStack;
 
         var questionID;
 
         console.log('Current Question', currentQuestion);
 
         switch (currentState) {
+            case this.state.states.LOADING:
+                nextQuestion = null;
+                showDontKnow = false;
+                showDontKnowBox = false;
+                state = this.state.states.LOADING;
+                //XXX Fire Modal for submitting here
+                this.onSave();
+
+                // Reset Survey Linked List
+                head = this.state.headStack[0] || head;
+                while (head.prev) {
+                    head = head.prev;
+                }
+                headStack = [];
+                break;
             // On Submit page and next was pressed
             case this.state.states.SUBMIT:
                 nextQuestion = null;
                 showDontKnow = false;
                 showDontKnowBox = false;
                 state = this.state.states.SPLASH;
-                    //XXX Fire Modal for submitting here
+                //XXX Fire Modal for submitting here
                 this.onSave();
 
                 // Reset Survey Linked List
@@ -168,6 +268,7 @@ var Application = React.createClass({
 
             // On Splash page and next was pressed
             case this.state.states.SPLASH:
+
                 nextQuestion = this.state.head;
                 showDontKnow = nextQuestion.allow_dont_know || false;
                 showDontKnowBox = false;
@@ -239,7 +340,7 @@ var Application = React.createClass({
                             // XXX: When adding repeat questions make sure to augment the question.id in a repeatable and unique way
                             // XXX: QuestionIDs are used to distinguish/remember questions everywhere, do not reuse IDs!
                             for (var i = 0; i < sub.nodes.length; i++) {
-                                if (i == 0) {
+                                if (i === 0) {
                                     clone.next = sub.nodes[i];
                                     sub.nodes[i].prev = clone;
                                 } else {
@@ -585,7 +686,7 @@ var Application = React.createClass({
         ids = ids || {};
 
         Object.keys(node).forEach(function(key) {
-            if (key != 'next' && key != 'prev') {
+            if (key !== 'next' && key !== 'prev') {
                 clone[key] = node[key];
             }
         });
@@ -653,13 +754,24 @@ var Application = React.createClass({
                 if (question.type_constraint === 'facility') {
                     if (response.metadata && response.metadata.is_new) {
                         console.log('Facility:', response);
-                        self.state.trees[question.id]
-                            .addFacility(response.response.lat, response.response.lng, response.response);
+
+                        // if self.state.trees.[question.id] exists, the compressed data from Revisit
+                        // was successfully downloaded initially
+                        var in_tree = false;
+                        var tree = self.state.trees[question.id];
+                        if (tree && tree.root) {
+                            self.state.trees[question.id]
+                                .addFacility(response.response.lat, response.response.lng, response.response);
+                            in_tree = true;
+                        } else {
+                            console.log('Question ' + question.id + '\'s tree does not have a facility root node.');
+                        }
 
                         unsynced_facilities.push({
                             'surveyID': self.props.survey.id,
                             'facilityData': response.response,
-                            'questionID': question.id
+                            'questionID': question.id,
+                            'in_tree': in_tree
                         });
                     }
                 }
@@ -681,7 +793,6 @@ var Application = React.createClass({
         var submission = {
             submitter_name: localStorage['submitter_name'] || 'anon',
             submitter_email: localStorage['submitter_email'] || 'anon@anon.org',
-            submission_type: 'unauthenticated', //XXX
             survey_id: this.props.survey.id,
             answers: answers,
             start_time: survey.start_time || null,
@@ -715,11 +826,6 @@ var Application = React.createClass({
      * Only modifies localStorage on success
      */
     onSubmit: function() {
-        function getCookie(name) {
-            var r = document.cookie.match('\\b' + name + '=([^;]*)\\b');
-            return r ? r[1] : undefined;
-        }
-
         var self = this;
 
         // Get all unsynced surveys
@@ -742,7 +848,7 @@ var Application = React.createClass({
                 processData: false,
                 data: JSON.stringify(survey),
                 headers: {
-                    'X-XSRFToken': getCookie('_xsrf')
+                    'X-XSRFToken': cookies.getCookie('_xsrf')
                 },
                 dataType: 'json',
                 success: function(survey, anything, hey) {
@@ -798,7 +904,7 @@ var Application = React.createClass({
                             'image': base64
                         }),
                         headers: {
-                            'X-XSRFToken': getCookie('_xsrf')
+                            'X-XSRFToken': cookies.getCookie('_xsrf')
                         },
                         dataType: 'json',
                         success: function(photo) {
@@ -915,7 +1021,7 @@ var Application = React.createClass({
                                 key={questionID}
                                 question={question}
                                 questionType={questionType}
-                                language={survey.default_language}
+                                language={this.state.language}
                                 surveyID={survey.id}
                                 disabled={this.state.showDontKnowBox}
                            />
@@ -927,7 +1033,7 @@ var Application = React.createClass({
                                 key={questionID}
                                 question={question}
                                 questionType={questionType}
-                                language={survey.default_language}
+                                language={this.state.language}
                                 surveyID={survey.id}
                                 disabled={this.state.showDontKnowBox}
                                 db={this.state.db}
@@ -941,7 +1047,7 @@ var Application = React.createClass({
                                 key={questionID}
                                 question={question}
                                 questionType={questionType}
-                                language={survey.default_language}
+                                language={this.state.language}
                                 surveyID={survey.id}
                                 disabled={this.state.showDontKnowBox}
                            />
@@ -953,7 +1059,7 @@ var Application = React.createClass({
                                 key={questionID}
                                 question={question}
                                 questionType={questionType}
-                                language={survey.default_language}
+                                language={this.state.language}
                                 surveyID={survey.id}
                                 disabled={this.state.showDontKnowBox}
                                 db={this.state.db}
@@ -967,7 +1073,7 @@ var Application = React.createClass({
                                 key={questionID}
                                 question={question}
                                 questionType={questionType}
-                                language={survey.default_language}
+                                language={this.state.language}
                                 surveyID={survey.id}
                                 disabled={this.state.showDontKnowBox}
                            />
@@ -979,7 +1085,7 @@ var Application = React.createClass({
                                 key={questionID}
                                 question={question}
                                 questionType={questionType}
-                                language={survey.default_language}
+                                language={this.state.language}
                                 surveyID={survey.id}
                                 disabled={this.state.showDontKnowBox}
                            />
@@ -990,7 +1096,8 @@ var Application = React.createClass({
                 <Submit
                         ref='submit'
                         surveyID={survey.id}
-                        language={survey.default_language}
+                        loggedIn={this.state.loggedIn}
+                        language={this.state.language}
                     />
             );
         } else {
@@ -999,7 +1106,7 @@ var Application = React.createClass({
                         ref='splash'
                         surveyID={survey.id}
                         surveyTitle={survey.title}
-                        language={survey.default_language}
+                        language={this.state.language}
                         buttonFunction={this.onSubmit}
                     />
             );
@@ -1015,11 +1122,11 @@ var Application = React.createClass({
         var state = this.state.state;
 
         if (state === this.state.states.QUESTION) {
-            return question.title[survey.default_language];
+            return question.title[this.state.language];
         } else if (state === this.state.states.SUBMIT) {
             return 'Ready to Save?';
         } else {
-            return survey.title[survey.default_language];
+            return survey.title[this.state.language];
         }
     },
 
@@ -1032,7 +1139,7 @@ var Application = React.createClass({
         var state = this.state.state;
 
         if (state === this.state.states.QUESTION) {
-            return question.hint[survey.default_language];
+            return question.hint[this.state.language];
         } else if (state === this.state.states.SUBMIT) {
             return 'If you are satisfied with the answers to all the questions, you can save the survey now.';
         } else {
@@ -1065,6 +1172,7 @@ var Application = React.createClass({
         var number = -1;
         var length = 0;
         var head = this.state.head;
+        var loading = null;
         while (head) {
             if (head.id === questionID) {
                 number = length;
@@ -1076,41 +1184,52 @@ var Application = React.createClass({
 
 
         // Alter the height of content based on DontKnow state
-        if (this.state.showDontKnow)
+        if (this.state.showDontKnow) {
             contentClasses += ' content-shrunk';
+        }
 
-        if (this.state.showDontKnowBox)
+        if (this.state.showDontKnowBox) {
             contentClasses += ' content-shrunk content-super-shrunk';
-
+        }
+        console.log('this.state.state: ', this.state.state, this.state.states.LOADING);
+        if (this.state.state === this.state.states.LOADING) {
+            console.log('loading!');
+            loading = <Loading message="Please be patient while facility data is downloaded."/>;
+        }
         return (
             <div id='wrapper'>
-                    <Header
-                        ref='header'
-                        buttonFunction={this.onPrevButton}
-                        number={number + 1}
-                        total={length + 1}
-                        db={this.state.db}
-                        surveyID={surveyID}
-                        splash={state === this.state.states.SPLASH}/>
-                    <div
-                        className={contentClasses}>
-                        <Title title={this.getTitle()} message={this.getMessage()} />
-                        {this.getContent()}
-                    </div>
-                    <Footer
-                        ref='footer'
-                        showDontKnow={this.state.showDontKnow}
-                        showDontKnowBox={this.state.showDontKnowBox}
-                        buttonFunction={this.onNextButton}
-                        checkBoxFunction={this.onCheckButton}
-                        buttonType={state === this.state.states.QUESTION
-                            ? 'btn-primary': 'btn-positive'}
-                        buttonText={this.getButtonText()}
-                        questionID={questionID}
-                        surveyID={surveyID}
-                     />
-
+                {loading}
+                <Header
+                    ref='header'
+                    buttonFunction={this.onPrevButton}
+                    number={number + 1}
+                    total={length + 1}
+                    db={this.state.db}
+                    surveyID={surveyID}
+                    survey={this.props.survey}
+                    language={this.state.language}
+                    loggedIn={this.state.loggedIn}
+                    hasFacilities={this.state.hasFacilities}
+                    splash={state === this.state.states.SPLASH}/>
+                <div
+                    className={contentClasses}>
+                    <Title title={this.getTitle()} message={this.getMessage()} />
+                    {this.getContent()}
                 </div>
+                <Footer
+                    ref='footer'
+                    showDontKnow={this.state.showDontKnow}
+                    showDontKnowBox={this.state.showDontKnowBox}
+                    buttonFunction={this.onNextButton}
+                    checkBoxFunction={this.onCheckButton}
+                    buttonType={state === this.state.states.QUESTION
+                        ? 'btn-primary': 'btn-positive'}
+                    buttonText={this.getButtonText()}
+                    questionID={questionID}
+                    surveyID={surveyID}
+                 />
+
+            </div>
         );
     }
 });

@@ -49,6 +49,7 @@ with session.begin():
                 )
             ),
             models.construct_survey_node(
+                allow_dont_know=True,
                 node=models.construct_node(
                     type_constraint='text',
                     title={'English': 'Community Name'}
@@ -56,8 +57,17 @@ with session.begin():
             ),
             models.construct_survey_node(
                 node=models.construct_node(
-                    type_constraint='text',
-                    title={'English': 'Facility Name'}
+                    type_constraint='facility',
+                    title={'English': 'Facility'},
+                    hint={'English': 'Select the facility from the list,'
+                          ' or add a new one.'},
+                    # NYC
+                    logic={
+                        'slat': 40.477398,
+                        'nlat': 40.91758,
+                        'wlng': -74.259094,
+                        'elng': -73.700165,
+                    }
                 )
             ),
             models.construct_survey_node(

@@ -1,11 +1,11 @@
-var React = require('react');
-var Promise = require('mpromise');
+var $ = require('jquery'),
+    React = require('react'),
 
-var ResponseField = require('./baseComponents/ResponseField.js');
-var LittleButton = require('./baseComponents/LittleButton.js');
+    ResponseField = require('./baseComponents/ResponseField.js'),
+    LittleButton = require('./baseComponents/LittleButton.js'),
 
-var FacilityRadios = require('./baseComponents/FacilityRadios.js');
-var Select = require('./baseComponents/Select.js');
+    FacilityRadios = require('./baseComponents/FacilityRadios.js'),
+    Select = require('./baseComponents/Select.js');
 
 /*
  * Facilities question component
@@ -25,6 +25,7 @@ module.exports = React.createClass({
         var selectOff = answer && answer.metadata && answer.metadata.is_new;
         return {
             loc: null,
+            loading: true,
             selectFacility: !selectOff,
             facilities: [],
             choices: [
@@ -42,12 +43,19 @@ module.exports = React.createClass({
     componentWillMount: function() {
         var loc = JSON.parse(localStorage['location'] || '{}');
         var self = this;
-        self.getFacilities(loc).onResolve(function(err, facilities) {
-            self.setState({
-                loc: loc,
-                facilities: facilities
+        // If we have a location fix, display the facilities,
+        // otherwise start fetching location fix
+        if (loc.lat) {
+            self.getFacilities(loc).done(function(facilities) {
+                self.setState({
+                    loc: loc,
+                    facilities: facilities,
+                    loading: false
+                });
             });
-        });
+        } else {
+            this.onLocate();
+        }
     },
     /*
      * Hack to force react to update child components
@@ -79,7 +87,7 @@ module.exports = React.createClass({
      * @data: I have no idea why i have this?
      */
     selectFacility: function(option, data) {
-        console.log("Selected facility");
+        console.log('Selected facility');
         var survey = JSON.parse(localStorage[this.props.surveyID] || '{}');
         var answers = survey[this.props.question.id] || [];
         answers = [];
@@ -112,13 +120,15 @@ module.exports = React.createClass({
      * @loc: The location ({lat: NUM, lng: NUM}) to query around
      */
     getFacilities: function(loc) {
-        if (!loc || !loc.lat || !loc.lng || !this.props.tree || !this.props.tree.root) {
-            var p = new Promise;
-            p.fulfill([]);
-            return p;
-        }
+        // console.log('getFacilities', this.props.tree);
+        // var d = $.Deferred();
+        // if (!loc || !loc.lat || !loc.lng || !this.props.tree || !this.props.tree.root) {
 
-        console.log("Getting facilities ...");
+        //     d.resolve([]);
+        //     return d;
+        // }
+
+        console.log('Getting facilities ...');
         return this.props.tree.getNNearestFacilities(loc.lat, loc.lng, 1000, 10);
     },
 
@@ -128,7 +138,7 @@ module.exports = React.createClass({
     getAnswer: function() {
         var survey = JSON.parse(localStorage[this.props.surveyID] || '{}');
         var answers = survey[this.props.question.id] || [];
-        console.log("Selected facility", answers[0]);
+        console.log('Selected facility', answers[0]);
         if (answers[0]) return answers[0];
     },
 
@@ -151,10 +161,9 @@ module.exports = React.createClass({
      * @value: newly supplied input
      */
     onInput: function(type, value) {
-        console.log("Dealing with input", value, type);
+        console.log('Dealing with input', value, type);
         var survey = JSON.parse(localStorage[this.props.surveyID] || '{}');
         var answers = survey[this.props.question.id] || [];
-        var self = this;
         if (answers[0] && (!answers[0].metadata || !answers[0].metadata.is_new)) {
             answers = [];
         }
@@ -180,6 +189,18 @@ module.exports = React.createClass({
                 console.log('Other v', value);
                 response.facility_sector = value;
                 break;
+            case 'has_grid_power':
+                console.log('Has grid power', value);
+                response.grid_power = value;
+                break;
+            case 'has_improved_water_supply':
+                console.log('Has improved water', value);
+                response.improved_water_supply = value;
+                break;
+            case 'has_improved_sanitation':
+                console.log('Has improved santiation', value);
+                response.improved_sanitation = value;
+                break;
         }
 
         //XXX Failed validation messes up facility question
@@ -193,38 +214,56 @@ module.exports = React.createClass({
             }
         }];
 
-        console.log("Built response", answers);
+        console.log('Built response', answers);
 
         survey[this.props.question.id] = answers;
         localStorage[this.props.surveyID] = JSON.stringify(survey);
     },
 
+    onChangeGrid: function(e) {
+        console.log(e);
+        this.onInput('has_grid_power', e.target.checked);
+    },
+
+    onChangeWater: function(e) {
+        console.log(e);
+        this.onInput('has_improved_water_supply', e.target.checked);
+    },
+
+    onChangeSanitation: function(e) {
+        console.log(e);
+        this.onInput('has_improved_sanitation', e.target.checked);
+    },
 
     /*
      * Retrieve location and record into state on success.
      */
     onLocate: function() {
         var self = this;
+        self.setState({
+            loading: true
+        });
         navigator.geolocation.getCurrentPosition(
             function success(position) {
                 var loc = {
                     'lat': position.coords.latitude,
-                    'lng': position.coords.longitude,
-                }
+                    'lng': position.coords.longitude
+                };
 
                 // Record location for survey
                 localStorage['location'] = JSON.stringify(loc);
 
-                self.getFacilities(loc).onResolve(function(err, facilities) {
+                self.getFacilities(loc).done(function(facilities) {
                     self.setState({
                         loc: loc,
-                        facilities: facilities
+                        facilities: facilities,
+                        loading: false
                     });
                 });
             },
 
             function error() {
-                console.log("Location could not be grabbed");
+                console.error('Location could not be grabbed');
             },
 
             {
@@ -240,7 +279,7 @@ module.exports = React.createClass({
     render: function() {
         // Retrieve respone for initValues
         var answer = this.getAnswer();
-        var choiceOptions = this.state.choices.map(function(choice) { return choice.value });
+        var choiceOptions = this.state.choices.map(function(choice) { return choice.value; });
 
         var hasLocation = this.state.loc && this.state.loc.lat && this.state.loc.lng;
         var isNew = answer && answer.metadata && answer.metadata.is_new;
@@ -250,46 +289,61 @@ module.exports = React.createClass({
         var isOther = choiceOptions.indexOf(sector) === -1;
         sector = isOther ? sector && 'other' : sector;
 
-        return (
+        var locStr;
+        if (hasLocation) {
+            locStr = this.state.loc.lat + ', ' + this.state.loc.lng;
+        }
+
+        var isLoading = null;
+        if (this.state.loading) {
+            isLoading = (
+                <div className='content-padded'>Loading...</div>
+            );
+        }
+        var content = (
+            <span>
+                <LittleButton buttonFunction={this.onLocate}
+                    icon={'icon-star'}
+                    text={'find nearby facilities'}
+                    disabled={this.props.disabled}
+                />
+
+                <FacilityRadios
+                    key={this.props.disabled}
+                    selectFunction={this.selectFacility}
+                    facilities={this.state.facilities}
+                    initValue={answer && !isNew && answer.response.facility_id}
+                    disabled={this.props.disabled}
+                />
+
+                { hasLocation  ?
+                    <LittleButton buttonFunction={this.toggleAddFacility}
+                        disabled={this.props.disabled}
+                        text={'add new facility'}
+                        extraClasses='btn-add-facility'
+                    />
+                    : null
+                }
+            </span>
+        );
+
+        if (!this.state.selectFacility) {
+            content = (
                 <span>
-                {this.state.selectFacility ?
-                    <span>
-                    <LittleButton buttonFunction={this.onLocate}
-                        icon={'icon-star'}
-                        text={'find my location and show nearby facilities'}
-                        disabled={this.props.disabled}
-                    />
-
-                    <FacilityRadios
-                        key={this.props.disabled}
-                        selectFunction={this.selectFacility}
-                        facilities={this.state.facilities}
-                        initValue={answer && !isNew && answer.response.facility_id}
-                        disabled={this.props.disabled}
-                    />
-
-                    { hasLocation  ?
-                        <LittleButton buttonFunction={this.toggleAddFacility}
-                            disabled={this.props.disabled}
-                            text={'add new facility'}
-                        />
-                        : null
-                    }
-                    </span>
-                :
-                    <span>
                     <ResponseField
                         onInput={this.onInput.bind(null, 'text')}
                         initValue={isNew && answer.response.facility_name}
                         type={'text'}
+                        placeholder="Facility name"
                         disabled={this.props.disabled}
                     />
                     <ResponseField
-                        initValue={JSON.stringify(this.state.loc)}
+                        initValue={locStr}
                         type={'location'}
                         disabled={true}
                     />
                     <Select
+                        placeholder='Choose a sector...'
                         choices={this.state.choices}
                         initValue={isNew && isOther ? answer.response.facility_sector : null}
                         initSelect={isNew && [sector]}
@@ -299,16 +353,53 @@ module.exports = React.createClass({
                         onSelect={this.onInput.bind(null, 'select')}
                         disabled={this.props.disabled}
                     />
+                    <div className='content-padded'>
+                        <div className='has-grid-power'>
+                            <input
+                                type='checkbox'
+                                id='has-grid-power'
+                                name='has-grid-power'
+                                onChange={this.onInput.bind(null, 'has_grid_power')}
+                                onChange={this.onChangeGrid}
+                            />
+                            <label htmlFor='has-grid-power'>has grid power</label>
+                        </div>
+
+                        <div className='has-improved-water-supply'>
+                            <input
+                                type='checkbox'
+                                id='has-improved-water-supply'
+                                name='has-improved-water-supply'
+                                onChange={this.onChangeWater}
+                            />
+                            <label htmlFor='has-improved-water-supply'>has improved water supply</label>
+                        </div>
+
+                        <div className='has-improved-sanitation'>
+                            <input
+                                type='checkbox'
+                                id='has-improved-sanitation'
+                                name='has-improved-sanitation'
+                                onChange={this.onChangeSanitation}
+                            />
+                            <label htmlFor='has-improved-sanitation'>has improved sanitation</label>
+                        </div>
+                    </div>
 
                     <LittleButton
                         buttonFunction={this.toggleAddFacility}
-                            text={'cancel'}
-                            disabled={this.props.disabled}
+                        text={'cancel'}
+                        disabled={this.props.disabled}
+                        extraClasses='btn-cancel'
                      />
-
-                    </span>
-                }
                 </span>
-               )
+            );
+        }
+
+        return (
+            <span>
+                {this.state.loading ? isLoading : content}
+            </span>
+       );
     }
 });

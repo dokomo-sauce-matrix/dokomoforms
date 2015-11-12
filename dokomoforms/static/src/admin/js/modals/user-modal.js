@@ -1,5 +1,5 @@
 var $ = require('jquery'),
-    ps = require('../pubsub'),
+    ps = require('../../../common/js/pubsub'),
     utils = require('../utils'),
     // Users = require('./models').Users,
     _t = require('../lang'),
@@ -55,9 +55,12 @@ var UserModal = function(user_id, surveys) {
                 default_language: $modal.find('#user-default-lang').val()
             }
         };
-
+        var surveys = $modal.find('#user-surveys').val() || [];
+        console.log('surveys', surveys);
         if (changeset.role === 'enumerator') {
-            changeset.allowed_surveys = $modal.find('#user-surveys').val() || [];
+            changeset.allowed_surveys = surveys;
+        } else if (changeset.role === 'administrator') {
+            changeset.admin_surveys = surveys;
         }
 
         user.set(changeset);

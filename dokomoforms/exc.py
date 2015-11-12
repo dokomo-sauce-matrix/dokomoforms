@@ -6,6 +6,11 @@ class DokomoError(Exception):
     """The base class for all exceptions used in Dokomo Forms."""
 
 
+class SurveyAccessForbidden(DokomoError):
+
+    """The logged-in user does not have access to the survey."""
+
+
 class NotJSONifiableError(DokomoError):
 
     """The jsonify function encountered a strange object."""
@@ -30,7 +35,7 @@ class NoSuchSubmissionTypeError(DokomoError):
     Raised when dokomoforms.models.submission.construct_submission
     is called with an invalid submission_type.
 
-    The valid types are 'unathenticated' and 'authenticated'
+    The valid types are 'unathenticated' and 'enumerator_only_submission'
     """
 
 

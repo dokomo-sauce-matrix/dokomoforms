@@ -22,6 +22,7 @@ from sqlalchemy import DDL
 from sqlalchemy.orm import sessionmaker
 
 from tornado.web import url
+import tornado.log
 import tornado.httpserver
 import tornado.web
 
@@ -34,7 +35,7 @@ if __name__ == '__main__':  # pragma: no cover
 
 import dokomoforms.handlers as handlers
 from dokomoforms.models import create_engine, Base, UUID_REGEX
-from dokomoforms.handlers.api import (
+from dokomoforms.handlers.api.v0 import (
     SurveyResource, SubmissionResource, PhotoResource, NodeResource,
     UserResource
 )
@@ -126,7 +127,7 @@ class Application(tornado.web.Application):
 
     """The tornado.web.Application for Dokomo Forms."""
 
-    def __init__(self, session=None):
+    def __init__(self, session=None, options=options):
         """Set up the application with handlers and a db connection.
 
         Defines the URLs (with associated handlers) and settings for the
@@ -143,32 +144,47 @@ class Application(tornado.web.Application):
             url(r'/', handlers.Index, name='index'),
             url(r'/user/login/?', handlers.Login, name='login'),
             url(r'/user/logout/?', handlers.Logout, name='logout'),
+            url(
+                r'/user/authenticated/?',
+                handlers.CheckLoginStatus,
+                name='check_login'
+            ),
 
             # Views
             # * Admin views
             url(
-                r'/view/({})/?'.format(UUID_REGEX),
+                r'/admin/?',
+                handlers.AdminHomepageHandler,
+                name='admin_homepage'
+            ),
+            url(
+                r'/admin/({})/?'.format(UUID_REGEX),
                 handlers.ViewSurveyHandler,
                 name='admin_survey_view',
             ),
             url(
-                r'/view/data/({})/?'.format(UUID_REGEX),
+                r'/admin/data/({})/?'.format(UUID_REGEX),
                 handlers.ViewSurveyDataHandler,
                 name='admin_data_view',
             ),
             url(
-                r'/view/submission/({})/?'.format(UUID_REGEX),
+                r'/admin/submission/({})/?'.format(UUID_REGEX),
                 handlers.ViewSubmissionHandler,
                 name='admin_submission_view',
             ),
 
             url(
-                r'/view/user-administration/?',
+                r'/admin/user-administration/?',
                 handlers.ViewUserAdminHandler,
                 name='admin_user_view',
             ),
 
-            # * Regular views
+            # * Enumerate views
+            url(
+                r'/enumerate/?',
+                handlers.EnumerateHomepageHandler,
+                name='enumerate_homepage'
+            ),
             url(
                 r'/enumerate/({})/?'.format(UUID_REGEX), handlers.Enumerate,
                 name='enumerate'
@@ -248,6 +264,8 @@ class Application(tornado.web.Application):
 
         # Debug
         if settings['debug']:  # pragma: no cover
+            from dokomoforms.handlers.debug import revisit_debug
+            revisit_debug()
             urls += [
                 url(r'/debug/create/(.+)/?',
                     handlers.DebugUserCreationHandler),
@@ -257,7 +275,17 @@ class Application(tornado.web.Application):
                 url(r'/debug/facilities/?', handlers.DebugRevisitHandler),
                 url(r'/debug/toggle_facilities/?',
                     handlers.DebugToggleRevisitHandler),
+                url(r'/debug/toggle_revisit_slow/?',
+                    handlers.DebugToggleRevisitSlowModeHandler),
             ]
+
+        # Demo
+        if options.demo:
+            urls += [
+                url(r'/demo/login/?', handlers.DemoUserCreationHandler),
+                url(r'/demo/logout/?', handlers.DemoLogoutHandler),
+            ]
+            options.organization = 'Demo Mode'
 
         super().__init__(urls, **settings)
 
@@ -308,8 +336,43 @@ def start_http_server(http_server, port):  # pragma: no cover
             raise
 
 
+def setup_file_loggers(log_level: str):  # pragma: no cover
+    """Handles application, Tornado, and SQLAlchemy logging configuration."""
+    os.makedirs('log', exist_ok=True)
+    timed_handler = logging.handlers.TimedRotatingFileHandler
+    root_logger = logging.getLogger()
+    root_logger.removeHandler(root_logger.handlers[0])
+    logging.basicConfig(
+        format='%(asctime)s %(levelname)s %(message)s',
+        handlers=[timed_handler('log/dokomoforms.log', when='D')]
+    )
+    for log in ('access', 'application', 'general'):
+        logger = logging.getLogger('tornado.{}'.format(log))
+        handler = timed_handler('log/tornado.{}.log'.format(log), when='D')
+        formatter = tornado.log.LogFormatter(color=False, datefmt=None)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    sql_logger = logging.getLogger('sqlalchemy')
+    sql_logger.propagate = False
+    sql_logger.setLevel(log_level)
+    sql_handler = timed_handler('log/sqlalchemy.log', when='D')
+    sql_handler.setLevel(log_level)
+    sql_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s %(name)s %(message)s'
+    ))
+    sql_logger.addHandler(sql_handler)
+
+
 def main(msg=None):  # pragma: no cover
     """Start the Tornado web server."""
+    log_level = logging.DEBUG if options.debug else logging.INFO
+    if options.log_to_file:
+        options.logging = None
+        setup_file_loggers(log_level)
+    else:
+        logging.getLogger().setLevel(log_level)
+        logging.getLogger('tornado').setLevel(log_level)
+        logging.getLogger('sqlalchemy').setLevel(log_level)
     if options.kill:
         ensure_that_user_wants_to_drop_schema()
     http_server = tornado.httpserver.HTTPServer(Application())
@@ -317,7 +380,7 @@ def main(msg=None):  # pragma: no cover
         os.path.join(_pwd, 'locale'), 'dokomoforms'
     )
     start_http_server(http_server, options.port)
-    logging.info(
+    print(
         '{dokomo}{starting}'.format(
             dokomo=modify_text(
                 'Dokomo Forms for {}: '.format(options.organization), bold
@@ -327,6 +390,7 @@ def main(msg=None):  # pragma: no cover
             ),
         )
     )
+    logging.info('Application started.')
     if msg is not None:
         print(msg)
     tornado.ioloop.IOLoop.current().start()

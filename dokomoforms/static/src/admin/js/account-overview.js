@@ -3,51 +3,104 @@ var $ = require('jquery'),
     L = require('leaflet'),
     moment = require('moment'),
     base = require('./base'),
-    submissionModal = require('./submission-modal'),
+    ps = require('../../common/js/pubsub'),
+    SubmissionModal = require('./modals/submission-modal'),
     view_btn_tpl = require('../templates/button-view-data.tpl'),
     manage_btn_tpl = require('../templates/button-manage-survey.tpl'),
     dl_btn_tpl = require('../templates/button-download-data.tpl'),
-    _t = require('./lang');
+    recent_sub_tpl = require('../templates/recent-submission-row.tpl'),
+    _t = require('./lang'),
+    activityGraph = require('./activity-graph');
 
 var AccountOverview = (function() {
+    var recentSubmissions = [];
 
     function init() {
         base.init();
         if (window.CURRENT_USER_ID !== 'None') {
             loadActivityGraph();
-            loadMap();
+            loadRecentSubmissions()
+                .done(function(data) {
+                    // store recent subs for detail modal browsing
+                    recentSubmissions = _.pluck(data.submissions, 'id');
+                    console.log('recentSubmissions', recentSubmissions);
+                })
+                .done(drawMap)
+                .done(drawRecentSubs);
             setupDataTable();
+            setupEventHandlers();
+
         }
     }
 
-    function loadMap() {
-        console.log('loadMap');
+    function setupEventHandlers() {
+        $(document).on('click', 'tr.submission-row', function() {
+            // select this row in the datatable
+            selectSubmissionRow($(this));
+            var submission_id = $(this).data('id');
+            var idx = recentSubmissions.indexOf(submission_id);
+            new SubmissionModal({submissions: recentSubmissions, initialIndex: idx}).open();
+        });
+
+        ps.subscribe('submissions:select_row', function(e, el) {
+            console.log(el);
+            selectSubmissionRow($(el));
+        });
+    }
+
+    function selectSubmissionRow($el) {
+        $('tr.submission-row').removeClass('selected');
+        $el.addClass('selected');
+    }
+
+    function drawRecentSubs(data) {
+        console.log('drawRecentSubs', data);
+        var submissions = data.submissions,
+            $table = $('#recent-list table tbody');
+        submissions.forEach(function(sub) {
+            sub.submission_time = moment(sub.submission_time).format('MMM d, YYYY [at] HH:mm');
+            sub.survey = {
+                id: sub.survey_id,
+                default_language: sub.survey_default_language
+            };
+            var displayData = _.extend(sub, { _t: _t});
+            $table.append(recent_sub_tpl(displayData));
+        });
+    }
+
+    function loadRecentSubmissions() {
+        var limit = 5;
+        return $.getJSON('/api/v0/submissions?order_by=save_time:DESC&limit=' + limit +
+            '&fields=id,submission_time,submitter_name,survey_title,survey_id,survey_default_language,answers');
+    }
+
+    function drawMap(data) {
+        console.log('drawMap');
         // Map
-        var map,
-            limit = 5;
-        $.getJSON('/api/v0/submissions?order_by=save_time:DESC&limit=' + limit, function(data) {
-            var submissions = data.submissions;
-            if (submissions.length) {
-                $(document).on('shown.bs.tab', 'a[href="#recent-map"]', function() {
-                    if (!map) {
-                        map = L.map('recent-map-container', {
-                            dragging: true,
-                            zoom: 14,
-                            attributionControl: false
-                        });
-                        L.tileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {}).addTo(map);
-                        var markers = [];
-                        _.each(submissions, function(submission) {
-                            console.log(submission);
-                            var answers = submission.answers,
-                                location = _.find(answers, function(answer) {
-                                    return answer.type_constraint == 'location';
-                                });
-                            if (!location || !location.response) {
-                                return;
-                            }
+        var map;
+        var submissions = data.submissions;
+        if (submissions.length) {
+            $(document).on('shown.bs.tab', 'a[href="#recent-map"]', function() {
+                if (!map) {
+                    map = L.map('recent-map-container', {
+                        dragging: true,
+                        zoom: 14,
+                        attributionControl: false
+                    });
+                    L.tileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {}).addTo(map);
+                    var markers = [];
+                    _.each(submissions, function(submission) {
+                        console.log(submission);
+                        var answers = submission.answers,
+                            locations = _.filter(answers, function(answer) {
+                                return answer.type_constraint === 'location' || answer.type_constraint === 'facility';
+                            });
+                        // if no locations/facilties found, return
+                        if (!locations || !locations.length) {
+                            return;
+                        }
+                        locations.forEach(function(location) {
                             location = location.response;
-                            // console.log('location:', location);
                             // stored lon/lat in revisit, switch around
                             var marker = new L.marker([location.lat, location.lng], {
                                 riseOnHover: true
@@ -58,77 +111,84 @@ var AccountOverview = (function() {
                             });
                             // marker.bindPopup();
                             marker.on('click', function() {
-                                submissionModal.openSubmissionDetailModal(submission.id);
+                                new SubmissionModal({submission_id: submission.id}).open();
                             });
                             markers.push(marker);
                         });
+                    });
 
-                        if (markers.length) {
-                            var markers_group = new L.featureGroup(markers);
-                            markers_group.addTo(map);
-                            map.fitBounds(markers_group.getBounds(), {
-                                padding: [40, 40]
-                            });
-                        } else {
-                            console.log('No submissions include location.');
-                        }
+                    if (markers.length) {
+                        var markers_group = new L.featureGroup(markers);
+                        markers_group.addTo(map);
+                        map.fitBounds(markers_group.getBounds(), {
+                            padding: [40, 40]
+                        });
+                    } else {
+                        console.log('No submissions include location.');
                     }
-                });
-            }
-        });
+                }
+            });
+        }
     }
 
     function loadActivityGraph() {
-        // Activity Graph
-        $.getJSON('/api/v0/surveys/activity?user_id=' + window.CURRENT_USER_ID, function(resp) {
 
-            var results = resp.activity,
-                cats = [],
-                data = [];
+        activityGraph('/api/v0/surveys/activity?user_id=' + window.CURRENT_USER_ID, 30, '.activity-graph');
 
-            if (!results.length) {
-                $('.no-activity-message').removeClass('hide');
-                return;
-            }
+        // // Activity Graph
+        // $.getJSON('/api/v0/surveys/activity?user_id=' + window.CURRENT_USER_ID, function(resp) {
 
-            var sorted = _.sortBy(results, function(result) {
-                return result.date;
-            });
+        //     var results = resp.activity,
+        //         cats = [],
+        //         data = [];
 
-            _.each(sorted, function(result) {
-                var the_date = moment(result.date, 'YYYY-MM-DD').format('MMM D');
-                data.push(result.num_submissions);
-                cats.push(the_date);
-            });
+        //     if (!results.length) {
+        //         $('.no-activity-message').removeClass('hide');
+        //         return;
+        //     }
+
+        //     var sorted = _.sortBy(results, function(result) {
+        //         return result.date;
+        //     });
+
+        //     _.each(sorted, function(result) {
+        //         var the_date = moment(result.date, 'YYYY-MM-DD').format('MMM D');
+        //         data.push(result.num_submissions);
+        //         cats.push(the_date);
+        //     });
 
 
-            $('.activity-graph').highcharts({
-                chart: {
-                    type: 'line'
-                },
-                title: {
-                    text: null
-                },
-                colors: [
-                    '#666'
-                ],
-                xAxis: {
-                    categories: cats
-                },
-                yAxis: {
-                    title: {
-                        text: '# of submissions'
-                    }
-                },
-                series: [{
-                    name: 'Submissions',
-                    data: data
-                }],
-                credits: {
-                    enabled: false
-                }
-            });
-        });
+        //     $('.activity-graph').highcharts({
+        //         chart: {
+        //             type: 'column'
+        //         },
+        //         title: {
+        //             text: null
+        //         },
+        //         colors: [
+        //             '#666'
+        //         ],
+        //         xAxis: {
+        //             categories: cats
+        //         },
+        //         yAxis: {
+        //             title: {
+        //                 text: '# of submissions'
+        //             },
+        //             allowDecimals: false
+        //         },
+        //         series: [{
+        //             name: 'Submissions',
+        //             data: data
+        //         }],
+        //         legend: {
+        //             enabled: false
+        //         },
+        //         credits: {
+        //             enabled: false
+        //         }
+        //     });
+        // });
     }
 
     function setupDataTable() {
@@ -146,19 +206,35 @@ var AccountOverview = (function() {
                 ],
                 'pagingType': 'full_numbers',
                 'order': [
-                    [2, 'desc']
+                    [1, 'desc']
                 ],
                 'columnDefs': [{
-                    'data': 0,
-                    'render': function(data, type, row) {
-                        return data;
+                    'data': function(row) {
+                        return {
+                            title: row.title,
+                            id: row.id
+                        };
                     },
-                    'targets': 0
+                    'targets': 0,
+                    'render': function(data) {
+                        return '<a href="/admin/' + data.id + '">' + data.title + '</a>';
+                    }
                 }, {
-                    'data': 1,
-                    targets: 1
+                    'data': 'created_on',
+                    targets: 1,
+                    'render': function(data, type, row) {
+                        if (data) {
+                            var datetime = moment(data);
+                            return datetime.format('MMM D, YYYY');
+                        } else {
+                            return '';
+                        }
+                    }
                 }, {
-                    'data': 2,
+                    'data': 'num_submissions',
+                    'targets': 2
+                }, {
+                    'data': 'latest_submission_time',
                     'render': function(data, type, row) {
                         if (data) {
                             var datetime = moment(data);
@@ -167,16 +243,9 @@ var AccountOverview = (function() {
                             return '';
                         }
                     },
-                    'targets': 2
+                    'targets': 3
                 }, {
-                    'data': 3,
-                    'render': function(data, type, row) {
-                        return '...'; // TODO: ask @jmwohl about this.
-                    },
-                    'targets': 3,
-                    'sortable': false
-                }, {
-                    'data': 3,
+                    'data': 'id',
                     'render': function(data, type, row) {
                         // console.log(data);
                         var view = view_btn_tpl({
@@ -196,15 +265,23 @@ var AccountOverview = (function() {
                     'width': '340px',
                     'class': 'text-center',
                     'sortable': false
+                }, {
+                    'data': 'id',
+                    'targets': 5,
+                    'visible': false
                 }],
                 'columns': [{
                     'name': 'title'
+                },  {
+                    'name': 'created_on'
                 }, {
                     'name': 'num_submissions'
                 }, {
                     'name': 'latest_submission_time'
                 }, {
                     'name': 'id'
+                }, {
+                    'name': 'default_language'
                 }],
                 'processing': true,
                 'serverSide': true,
@@ -235,12 +312,13 @@ var AccountOverview = (function() {
                                 recordsTotal: json.total_entries,
                                 recordsFiltered: json.filtered_entries,
                                 data: json.surveys.map(function(survey) {
-                                    return [
-                                        _t(survey.title),
-                                        survey.num_submissions,
-                                        survey.latest_submission_time,
-                                        survey.id
-                                    ];
+                                    return {
+                                        title: _t(survey.title, survey),
+                                        created_on: survey.created_on,
+                                        num_submissions: survey.num_submissions,
+                                        latest_submission_time: survey.latest_submission_time,
+                                        id: survey.id
+                                    };
                                 })
                             };
                             callback(response);

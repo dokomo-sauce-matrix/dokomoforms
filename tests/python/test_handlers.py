@@ -1,11 +1,13 @@
 """Handler tests"""
 from unittest.mock import patch
+import uuid
 
 from bs4 import BeautifulSoup
 
 import lzstring
 
 import sqlalchemy as sa
+from sqlalchemy.sql.functions import count
 from sqlalchemy.dialects import postgresql as pg
 
 from tornado.escape import json_decode, json_encode, url_escape
@@ -21,7 +23,7 @@ utils = (setUpModule, tearDownModule)
 
 import dokomoforms.handlers as handlers
 import dokomoforms.handlers.auth
-from dokomoforms.handlers.util import BaseAPIHandler
+from dokomoforms.handlers.util import BaseHandler, BaseAPIHandler
 import dokomoforms.models as models
 
 
@@ -32,7 +34,13 @@ class TestIndex(DokoHTTPTest):
         links = response_soup.select('a.btn-login.btn-large')
         self.assertEqual(len(links), 1, msg=response.body)
 
-    def test_get_logged_in(self):
+    def test_get_logged_in_admin(self):
+        num_surveys = (
+            self.session
+            .query(count(models.Survey.id))
+            .filter_by(creator_id='b7becd02-1a3f-4c1d-a0e1-286ba121aef4')
+            .scalar()
+        )
         response = self.fetch('/', method='GET')
         response_soup = BeautifulSoup(response.body, 'html.parser')
         links = response_soup.select('a.btn-login.btn-large')
@@ -43,7 +51,11 @@ class TestIndex(DokoHTTPTest):
         survey_dropdown = (
             response_soup.find('ul', {'aria-labelledby': 'SurveysDropdown'})
         )
-        self.assertEqual(len(survey_dropdown.findAll('li')), 10)
+        self.assertEqual(
+            len(survey_dropdown.findAll('li')),
+            min(num_surveys, BaseHandler.num_surveys_for_menu),
+            msg=survey_dropdown
+        )
 
 
 class TestNotFound(DokoHTTPTest):
@@ -274,6 +286,23 @@ class TestAuth(DokoHTTPTest):
         self.assertEqual(response.code, 400, msg=response.body)
 
 
+class TestBaseHandler(DokoHTTPTest):
+    def test_clear_user_cookie_if_not_uuid(self):
+        dummy_request = lambda: None
+        cookie_object = lambda: None
+        cookie_object.value = str(uuid.uuid4())
+        dummy_request.cookies = {'user': cookie_object}
+        dummy_connection = lambda: None
+        dummy_close_callback = lambda _: None
+        dummy_connection.set_close_callback = dummy_close_callback
+        dummy_request.connection = dummy_connection
+        with patch.object(BaseHandler, '_current_user_cookie') as p:
+            p.return_value = 'not a UUID'
+            handler = BaseHandler(self.app, dummy_request)
+            self.assertEqual(handler.get_cookie('user'), cookie_object.value)
+            self.assertIsNone(handler.current_user_model)
+
+
 class TestBaseAPIHandler(DokoHTTPTest):
     def test_api_version(self):
         dummy_request = lambda: None
@@ -437,7 +466,7 @@ class TestEnumerate(DokoHTTPTest):
             url,
             method='GET',
             follow_redirects=False,
-            _logged_in_user={'user_id': some_user.id, 'user_name': 'some_user'}
+            _logged_in_user=some_user.id,
         )
 
         self.assertEqual(response.code, 403)
@@ -457,7 +486,7 @@ class TestEnumerate(DokoHTTPTest):
             url,
             method='GET',
             follow_redirects=False,
-            _logged_in_user={'user_id': some_user.id, 'user_name': 'some_user'}
+            _logged_in_user=some_user.id,
         )
 
         self.assertEqual(response.code, 403)
@@ -466,7 +495,7 @@ class TestEnumerate(DokoHTTPTest):
 class TestView(DokoHTTPTest):
     def test_view_survey(self):
         survey_id = 'c0816b52-204f-41d4-aaf0-ac6ae2970925'
-        url = '/view/' + survey_id
+        url = '/admin/' + survey_id
         response = self.fetch(url, method='GET').body.decode()
 
         self.assertIn('Survey Info', response)
@@ -475,13 +504,13 @@ class TestView(DokoHTTPTest):
 
     def test_view_data(self):
         survey_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
-        url = '/view/data/' + survey_id
+        url = '/admin/data/' + survey_id
         response = self.fetch(url, method='GET')
         response_soup = BeautifulSoup(response.body, 'html.parser')
         questions = response_soup.findAll('div', {'class': 'question-stats'})
         self.assertEqual(len(questions), 5)
 
-    def test_view_data_with_map(self):
+    def test_view_data_with_map_location(self):
         survey_id = (
             self.session
             .query(models.SurveyNode.root_survey_id)
@@ -492,7 +521,24 @@ class TestView(DokoHTTPTest):
             )
             .scalar()
         )
-        url = '/view/data/' + survey_id
+        url = '/admin/data/' + survey_id
+        response = self.fetch(url, method='GET')
+        response_soup = BeautifulSoup(response.body, 'html.parser')
+        questions = response_soup.findAll('div', {'class': 'question-stats'})
+        self.assertEqual(len(questions), 1)
+
+    def test_view_data_with_map_facility(self):
+        survey_id = (
+            self.session
+            .query(models.SurveyNode.root_survey_id)
+            .filter(
+                sa.cast(
+                    models.SurveyNode.type_constraint, pg.TEXT
+                ) == 'facility'
+            )
+            .scalar()
+        )
+        url = '/admin/data/' + survey_id
         response = self.fetch(url, method='GET')
         response_soup = BeautifulSoup(response.body, 'html.parser')
         questions = response_soup.findAll('div', {'class': 'question-stats'})
@@ -503,11 +549,11 @@ class TestView(DokoHTTPTest):
             self.session.query(models.Submission.id).limit(1).scalar()
         )
         submission_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970924'
-        url = '/view/submission/' + submission_id
+        url = '/admin/submission/' + submission_id
         response = self.fetch(url, method='GET').body.decode()
         self.assertIn('Submission Detail', response)
 
     def test_view_user_administration(self):
-        url = '/view/user-administration'
+        url = '/admin/user-administration'
         response = self.fetch(url, method='GET').body.decode()
         self.assertIn('Users', response)

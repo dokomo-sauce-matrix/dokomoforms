@@ -1,18 +1,19 @@
 """Pages pertaining to debug-specific functionality."""
+from time import sleep
+
 from tornado.escape import json_encode, json_decode
 import tornado.web
 
 from sqlalchemy.sql import exists
 from sqlalchemy.orm.exc import NoResultFound
 
-from dokomoforms.options import options
 from dokomoforms.models import User, Administrator, Email
 from dokomoforms.handlers.util import BaseHandler
 
 
 class DebugUserCreationHandler(BaseHandler):
 
-    """User this page to create a user."""
+    """Use this page to create a user."""
 
     def get(self, email='test@test_email.com'):
         """Log in for any user (creating one if necessary)."""
@@ -48,14 +49,9 @@ class DebugLoginHandler(BaseHandler):
                 .one()
             )
             cookie_options = {
-                'expires_days': None,
                 'httponly': True,
             }
-            self.set_secure_cookie(
-                'user',
-                json_encode({'user_id': user.id, 'user_name': user.name}),
-                **cookie_options
-            )
+            self.set_secure_cookie('user', user.id, **cookie_options)
             response = {
                 'email': email,
                 'created': created,
@@ -96,9 +92,19 @@ class DebugPersonaHandler(BaseHandler):
         self.write({'status': 'okay', 'email': 'test_creator@fixtures.com'})
 
 
-if options.dev or options.debug:  # pragma: no cover
+revisit_online = slow_mode = None
+facilities_file = compressed_facilities = lzs = None
+
+
+def revisit_debug():  # pragma: no cover
+    global revisit_online
+    global slow_mode
+    global facilities_file
+    global compressed_facilities
+    global lzs
     import lzstring
     revisit_online = True
+    slow_mode = False
     facilities_file = 'tests/python/fake_revisit_facilities.json'
     with open(facilities_file, 'rb') as facilities:
         compressed_facilities = facilities.read()
@@ -115,8 +121,11 @@ class DebugRevisitHandler(BaseHandler):
 
     def get(self):
         """Get dummy facilities."""
+        global slow_mode
         if not revisit_online:
             raise tornado.web.HTTPError(502)
+        if slow_mode:  # pragma: no cover
+            sleep(2)
         self.write(compressed_facilities)
         self.set_header('Content-Type', 'application/json')
 
@@ -173,3 +182,17 @@ class DebugToggleRevisitHandler(BaseHandler):
                 revisit_online = False
         else:
             revisit_online = not revisit_online
+
+
+class DebugToggleRevisitSlowModeHandler(BaseHandler):  # pragma: no cover
+
+    """For toggling slow mode."""
+
+    def get(self):
+        """Toggle the 'slow' state of the GET endpoint."""
+        global slow_mode
+        state_arg = self.get_argument('state', None)
+        if state_arg:
+            slow_mode = state_arg == 'true'
+        else:
+            slow_mode = not slow_mode

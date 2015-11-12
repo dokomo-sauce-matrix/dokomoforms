@@ -25,7 +25,7 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="user-default-lang">Default Language</label>
+                            <label for="user-default-lang">Preferred Survey Language</label>
                             <select class="form-control" id="user-default-lang">
                                 <option <%= (data.preferences && data.preferences.default_language === 'English') ? "selected" : "" %>>English</option>
                                 <option <%= (data.preferences && data.preferences.default_language === 'Español') ? "selected" : "" %>>Español</option>
@@ -33,8 +33,8 @@
                         </div>
 
                         <!-- Surveys for enumerators -->
-                        <% if (data.role === 'enumerator') { %>
                         <div class="form-group">
+                            <% if (data.role === 'enumerator') { %>
                             <label for="user-surveys">Allowed Surveys
                                 <span class="info-icon" data-toggle="tooltip" data-placement="right" title="" data-original-title="This enumerator will only be allowed to submit to the surveys selected here.">i</span>
                             </label>
@@ -47,13 +47,29 @@
                                                 selected
                                             <% } %>
                                         >
-                                            <%= data._t(survey.title) %>
+                                            <%= data._t(survey.title, survey) %>
                                         </option>
                                     <% } %>
                                 <% }); %>
                             </select>
+                            <% } else if(data.role === 'administrator') { %>
+                            <label for="user-surveys">Admin Surveys
+                                <span class="info-icon" data-toggle="tooltip" data-placement="right" title="" data-original-title="This user will be able to administer the surveys selected here.">i</span>
+                            </label>
+                            <select multiple class="form-control" id="user-surveys">
+                                <% data.all_surveys.forEach(function(survey) { %>
+                                    <option
+                                        value="<%= survey.id %>"
+                                        <% if (data.admin_surveys && data.admin_surveys.indexOf(survey.id) !== -1) { %>
+                                            selected
+                                        <% } %>
+                                    >
+                                        <%= data._t(survey.title, survey) %>
+                                    </option>
+                                <% }); %>
+                            </select>
+                            <% } %>
                         </div>
-                        <% } %>
                 </div>
                 <div class="modal-footer">
                     <% if (data.id) { %>

@@ -1,15 +1,23 @@
 """Survey view handler."""
-import urllib.parse as urlparse
-from urllib.parse import urlencode
-
 from restless.exceptions import Unauthorized
 
 import tornado.web
 
-from dokomoforms.handlers.util import BaseHandler
-from dokomoforms.handlers.api import get_survey_for_handler
+from dokomoforms.exc import SurveyAccessForbidden
+from dokomoforms.handlers.util import BaseHandler, auth_redirect
+from dokomoforms.handlers.api.v0 import get_survey_for_handler
 from dokomoforms.options import options
 from dokomoforms.models import Survey
+
+
+class EnumerateHomepageHandler(BaseHandler):
+
+    """The endpoint for the main Enumerator interface."""
+
+    @tornado.web.authenticated
+    def get(self):
+        """GET the enumerate interface."""
+        self.render('enumerate_homepage.html')
 
 
 class Enumerate(BaseHandler):
@@ -29,33 +37,14 @@ class Enumerate(BaseHandler):
         try:
             survey = get_survey_for_handler(self, survey_id)
         except Unauthorized:
-            url = self.get_login_url()
-            if '?' not in url:
-                if urlparse.urlsplit(url).scheme:  # pragma: no cover
-                    next_url = self.request.full_url()
-                else:
-                    next_url = self.request.uri
-                url += '?' + urlencode({'next': next_url})
-            self.redirect(url)
-            return
-
-        # Raise a 403 if the logged-in user is not explicitly listed as an
-        # enumerator. This might not be the behavior we want, since this
-        # excludes the creator and any adminstrators who are not also
-        # enumerators.
-        # TODO: change the implementation (this does a naive check)
-        # TODO: rethink user permission structure
-        try:
-            enumerators = survey.enumerators
-        except AttributeError:
-            pass
-        else:
-            if self.current_user_model not in enumerators:
-                raise tornado.web.HTTPError(403)
+            return auth_redirect(self)
+        except SurveyAccessForbidden:
+            raise tornado.web.HTTPError(403)
 
         # pass in the revisit url
         self.render(
             'view_enumerate.html',
+            current_user_model=self.current_user_model,
             survey=survey,
             revisit_url=options.revisit_url
         )

@@ -18,9 +18,14 @@ import urllib.error
 from bs4 import BeautifulSoup
 
 import dateutil.parser
+from dateutil.tz import tzlocal
+
+from passlib.hash import bcrypt_sha256
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import (
+    TimeoutException, ElementNotVisibleException
+)
 from selenium.webdriver import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -242,12 +247,22 @@ class DriverTest(tests.python.util.DokoExternalDBTest):
             self.drv.switch_to.window(handle)
             return
 
+    attempted_wait_rescue = False
+
     def wait_for_element(self, identifier, by=By.ID, timeout=5, visible=False):
         visibility = EC.visibility_of_element_located
         presence = EC.presence_of_element_located
         loader = visibility if visible else presence
-        load = loader((by, identifier))
-        WebDriverWait(self.drv, timeout).until(load)
+        num_attempts = 1 if self.attempted_wait_rescue else 3
+        for attempt in range(num_attempts):
+            load = loader((by, identifier))
+            try:
+                WebDriverWait(self.drv, timeout).until(load)
+            except TimeoutException:
+                self.attempted_wait_rescue = True
+                if attempt == num_attempts - 1:
+                    raise
+                self.drv.refresh()
 
     def sleep(self, duration=None):
         default_duration = 1.25 if SAUCE_CONNECT else 0.25
@@ -340,6 +355,7 @@ class TestAuth(DriverTest):
         self.get('/')
         self.wait_for_element('btn-login', By.CLASS_NAME)
         self.click(self.drv.find_elements_by_class_name('btn-login')[-1])
+        self.sleep()
         self.switch_window()
         self.wait_for_element('authentication_email', visible=True)
         (
@@ -356,6 +372,7 @@ class AdminTest(DriverTest):
     def setUp(self):
         super().setUp()
         self.get('/debug/login/test_creator@fixtures.com')
+        self.wait_for_element('html', by=By.TAG_NAME)
 
 
 class TestAdminOverview(AdminTest):
@@ -368,10 +385,9 @@ class TestAdminOverview(AdminTest):
             5
         )
         # Activity graph
-        self.assertEqual(
-            len(self.drv.find_elements_by_tag_name('path')),
-            58
-        )
+        self.assertIsNotNone(self.drv.find_element_by_css_selector(
+            '.highcharts-series > rect:nth-child(31)'
+        ))
         # Surveys table
         rows = self.drv.find_elements_by_css_selector('table#surveys tbody tr')
         self.assertEqual(len(rows), 13)
@@ -416,7 +432,12 @@ class TestAdminOverview(AdminTest):
     @report_success_status
     def test_manage_survey_button(self):
         self.get('/')
+        self.sleep()
 
+        self.wait_for_element(
+            'tr.odd:nth-child(1) > td:nth-child(5) > a:nth-child(3)',
+            by=By.CSS_SELECTOR
+        )
         self.click(self.drv.find_element_by_css_selector(
             'tr.odd:nth-child(1) > td:nth-child(5) > a:nth-child(3)'
         ))
@@ -429,7 +450,13 @@ class TestAdminOverview(AdminTest):
     @report_success_status
     def test_download_json_button(self):
         self.get('/')
+        self.sleep()
 
+        self.wait_for_element(
+            'tr.odd:nth-child(1) > td:nth-child(5) > div:nth-child(2) >'
+            ' button:nth-child(1)',
+            by=By.CSS_SELECTOR,
+        )
         self.click(self.drv.find_element_by_css_selector(
             'tr.odd:nth-child(1) > td:nth-child(5) > div:nth-child(2) >'
             ' button:nth-child(1)'
@@ -447,10 +474,16 @@ class TestAdminOverview(AdminTest):
     @report_success_status
     def test_download_csv_button(self):
         self.get('/')
+        self.sleep()
 
+        self.wait_for_element(
+            '#surveys > tbody > tr:nth-child(1) > td.text-center > '
+            'div > button',
+            by=By.CSS_SELECTOR,
+        )
         self.click(self.drv.find_element_by_css_selector(
-            'tr.odd:nth-child(1) > td:nth-child(5) > div:nth-child(2) >'
-            ' button:nth-child(1)'
+            '#surveys > tbody > tr:nth-child(1) > td.text-center > '
+            'div > button'
         ))
 
         json_button = self.drv.find_element_by_css_selector(
@@ -465,6 +498,149 @@ class TestAdminOverview(AdminTest):
         )
 
 
+class TestAdminSettings(AdminTest):
+    def sleep(self, duration=None):
+        super().sleep(duration)
+
+        is_travis = os.environ.get('TRAVIS', 'f').startswith('t')
+        if is_travis and not SAUCE_CONNECT:
+            time.sleep(3)
+
+    @report_success_status
+    def test_update_settings(self):
+        self.get('/')
+
+        self.wait_for_element('UserDropdown')
+        self.click(self.drv.find_element_by_id('UserDropdown'))
+        self.sleep()
+
+        nav_list = self.drv.find_elements_by_class_name('nav-settings')
+        self.assertEqual(len(nav_list), 1)
+
+        self.sleep()
+        self.click(self.drv.find_element_by_class_name('nav-settings'))
+        self.wait_for_element('user-name')
+        name_field = self.drv.find_element_by_id('user-name')
+        self.click(name_field)
+        name_field.send_keys(Keys.BACK_SPACE * 9)
+        name_field.send_keys('new_user')
+        (
+            ActionChains(self.drv)
+            .key_down(
+                self.control_key,
+                self.drv.find_element_by_id('user-email')
+            )
+            .send_keys('a')
+            .key_up(self.control_key)
+            .send_keys('new@email.com')
+            .perform()
+        )
+        save_btn = self.drv.find_element_by_class_name('btn-save-user')
+        self.sleep()
+        save_btn.click()
+        self.sleep()
+
+        self.click(self.drv.find_element_by_id('UserDropdown'))
+        try:
+            self.click(self.drv.find_element_by_class_name('nav-settings'))
+        except ElementNotVisibleException:
+            # Don't ask me... xvfb weirdness
+            self.click(self.drv.find_element_by_id('UserDropdown'))
+            self.click(self.drv.find_element_by_class_name('nav-settings'))
+        self.wait_for_element('user-name')
+        name_val = (
+            self.drv
+            .find_element_by_id('user-name')
+            .get_attribute('value')
+        )
+        email_val = (
+            self.drv
+            .find_element_by_id('user-email')
+            .get_attribute('value')
+        )
+        self.assertEqual(name_val, 'new_user')
+        self.assertEqual(email_val, 'new@email.com')
+
+        # Check that the values have been updated in the database.
+        user = (
+            self.session
+            .query(Administrator)
+            .filter_by(id='b7becd02-1a3f-4c1d-a0e1-286ba121aef4')
+            .one()
+        )
+        self.assertEqual(user.name, 'new_user')
+        self.assertEqual(user.emails[0].address, 'new@email.com')
+
+    @report_success_status
+    def test_fetch_api_key(self):
+        def get_user_token():
+            return (
+                self.session
+                .query(Administrator.token)
+                .filter_by(id='b7becd02-1a3f-4c1d-a0e1-286ba121aef4')
+                .scalar()
+            )
+
+        def get_token_expiration():
+            return (
+                self.session
+                .query(Administrator.token_expiration)
+                .filter_by(id='b7becd02-1a3f-4c1d-a0e1-286ba121aef4')
+                .scalar()
+            )
+
+        self.get('/')
+
+        self.wait_for_element('UserDropdown', visible=True)
+        self.click(self.drv.find_element_by_id('UserDropdown'))
+        self.sleep()
+
+        nav = self.drv.find_elements_by_class_name('nav-settings')
+        self.assertEqual(len(nav), 1)
+
+        self.sleep()
+        self.click(self.drv.find_element_by_class_name('nav-settings'))
+        self.wait_for_element('btn-api-key', by=By.CLASS_NAME)
+        self.sleep()
+        self.click(self.drv.find_element_by_class_name('btn-api-key'))
+        self.sleep()
+
+        # Test that the displayed API token is the correct one.
+        api_token_field = self.drv.find_element_by_id('user-api-token')
+        api_token = api_token_field.get_attribute('value')
+        self.assertNotEqual(api_token, '')
+
+        user_token = get_user_token()
+        self.assertTrue(bcrypt_sha256.verify(api_token, user_token))
+
+        # Test that the expiration date displays
+        api_exp_field = self.drv.find_element_by_class_name(
+            'token-expiration-text'
+        )
+        token_expiration = get_token_expiration()
+        exp_formated = (
+            token_expiration
+            .strftime('%b %d, %Y')
+            .lstrip("0")
+            .replace(" 0", " ")
+        )
+        self.assertEqual(
+            'Token will expire on ' + exp_formated + '.',
+            api_exp_field.text
+        )
+
+        # Test that generating a new token invalidates the old one.
+        self.click(self.drv.find_element_by_class_name('btn-api-key'))
+        self.sleep()
+        new_token = api_token_field.get_attribute('value')
+        self.assertNotEqual(new_token, '')
+
+        new_user_token = get_user_token()
+
+        self.assertFalse(bcrypt_sha256.verify(api_token, new_user_token))
+        self.assertTrue(bcrypt_sha256.verify(new_token, new_user_token))
+
+
 class TestAdminUser(AdminTest):
     def sleep(self, duration=None):
         super().sleep(duration)
@@ -475,15 +651,16 @@ class TestAdminUser(AdminTest):
 
     @report_success_status
     def test_user_administration_renders_properly(self):
-        self.get('/view/user-administration')
+        self.get('/admin/user-administration')
 
         self.wait_for_element('table#users tbody tr', by=By.CSS_SELECTOR)
+
         rows = self.drv.find_elements_by_css_selector('table#users tbody tr')
         self.assertEqual(len(rows), 3)
 
     @report_success_status
     def test_add_user(self):
-        self.get('/view/user-administration')
+        self.get('/admin/user-administration')
 
         self.wait_for_element('btn-edit-user', by=By.CLASS_NAME)
 
@@ -508,7 +685,7 @@ class TestAdminUser(AdminTest):
         save_btn.click()
         self.sleep()
 
-        self.get('/view/user-administration')
+        self.get('/admin/user-administration')
         self.sleep()
 
         rows = self.drv.find_elements_by_css_selector('table#users tbody tr')
@@ -516,13 +693,14 @@ class TestAdminUser(AdminTest):
 
     @report_success_status
     def test_edit_user(self):
-        self.get('/view/user-administration')
-
+        self.get('/admin/user-administration')
         self.sleep()
+
         self.wait_for_element(
             'tr.odd:nth-child(3) > td:nth-child(5) > button:nth-child(1)',
             by=By.CSS_SELECTOR
         )
+
         edit_btn = self.drv.find_element_by_css_selector(
             'tr.odd:nth-child(3) > td:nth-child(5) > button:nth-child(1)'
         )
@@ -550,7 +728,7 @@ class TestAdminUser(AdminTest):
 
     @report_success_status
     def test_delete_user(self):
-        self.get('/view/user-administration')
+        self.get('/admin/user-administration')
 
         self.wait_for_element('btn-edit-user', by=By.CLASS_NAME)
 
@@ -576,7 +754,7 @@ class TestAdminUser(AdminTest):
         alert.accept()
         self.sleep(1)
 
-        self.get('/view/user-administration')
+        self.get('/admin/user-administration')
 
         self.wait_for_element('btn-edit-user', by=By.CLASS_NAME)
         rows = self.drv.find_elements_by_class_name('btn-edit-user')
@@ -586,7 +764,7 @@ class TestAdminUser(AdminTest):
 class TestAdminManageSurvey(AdminTest):
     @report_success_status
     def test_manage_renders_properly(self):
-        self.get('/view/b0816b52-204f-41d4-aaf0-ac6ae2970923')
+        self.get('/admin/b0816b52-204f-41d4-aaf0-ac6ae2970923')
 
         # Stats view
         stats = self.drv.find_elements_by_class_name('stat-value')
@@ -595,9 +773,15 @@ class TestAdminManageSurvey(AdminTest):
             dateutil.parser.parse(stats[0].text).date(),
             datetime.datetime.now().date()
         )
+        earliest_utc = (
+            self.session
+            .query(Survey.earliest_submission_time)
+            .filter_by(id='b0816b52-204f-41d4-aaf0-ac6ae2970923')
+            .scalar()
+        )
         self.assertEqual(
             dateutil.parser.parse(stats[1].text).date(),
-            datetime.datetime.now().date() - datetime.timedelta(days=99)
+            earliest_utc.astimezone(tzlocal()).date()
         )
         self.assertEqual(
             dateutil.parser.parse(stats[2].text).date(),
@@ -610,7 +794,7 @@ class TestAdminManageSurvey(AdminTest):
             (
                 self.drv
                 .find_element_by_id('shareable-link')
-                .get_attribute('value')
+                .text
             ),
             (
                 'http://localhost:9999/enumerate'
@@ -619,30 +803,174 @@ class TestAdminManageSurvey(AdminTest):
         )
 
         # Activity graph
-        self.assertEqual(
-            len(self.drv.find_elements_by_tag_name('path')),
-            59
+        self.assertIsNotNone(
+            self.drv.find_element_by_class_name('activity-graph')
         )
+
+        self.sleep(2)
 
         # Submissions table
         rows = (
             self.drv
             .find_elements_by_css_selector('table#submissions tbody tr')
         )
-        self.assertEqual(len(rows), 5)
+
+        self.assertEqual(len(rows), 20)
+
+    @report_success_status
+    def test_change_url_slug(self):
+        user = (
+            self.session
+            .query(Administrator)
+            .get('b7becd02-1a3f-4c1d-a0e1-286ba121aef4')
+        )
+        with self.session.begin():
+            survey = construct_survey(
+                creator=user,
+                survey_type='public',
+                title={'English': 'slug playground'},
+            )
+            self.session.add(survey)
+
+        survey_id = survey.id
+
+        self.get('/admin/' + survey_id)
+
+        link = self.drv.find_element_by_id('shareable-link').text
+        self.assertEqual(link, 'http://localhost:9999/enumerate/' + survey_id)
+
+        edit_btn = self.drv.find_element_by_class_name('glyphicon-pencil')
+        self.click(edit_btn)
+
+        slug_field = self.drv.find_element_by_class_name('shareable-url-slug')
+        # Try to put in bad characters as well
+        slug_field.send_keys('slug%#;/?:@&=+$, ')
+        self.click(self.drv.find_element_by_class_name('save-survey-url'))
+
+        self.wait_for_element('shareable-link')
+        new_link = self.drv.find_element_by_id('shareable-link').text
+        self.assertEqual(new_link, 'http://localhost:9999/enumerate/slug')
+
+        self.get('/enumerate/slug')
+        slug_src = self.drv.page_source
+        self.get('/enumerate/' + survey_id)
+        id_src = self.drv.page_source
+        self.assertEqual(slug_src, id_src)
+
+    @report_success_status
+    def test_remove_url_slug(self):
+        user = (
+            self.session
+            .query(Administrator)
+            .get('b7becd02-1a3f-4c1d-a0e1-286ba121aef4')
+        )
+        with self.session.begin():
+            survey = construct_survey(
+                creator=user,
+                survey_type='public',
+                title={'English': 'slug playground'},
+            )
+            self.session.add(survey)
+
+        survey_id = survey.id
+
+        self.get('/admin/' + survey_id)
+
+        edit_btn = self.drv.find_element_by_class_name('glyphicon-pencil')
+        self.click(edit_btn)
+
+        slug_field = self.drv.find_element_by_class_name('shareable-url-slug')
+        slug_field.send_keys('slug')
+        self.click(self.drv.find_element_by_class_name('save-survey-url'))
+
+        new_link = self.drv.find_element_by_id('shareable-link').text
+        self.assertEqual(new_link, 'http://localhost:9999/enumerate/slug')
+
+        edit_btn = self.drv.find_element_by_class_name('glyphicon-pencil')
+        self.click(edit_btn)
+        slug_field = self.drv.find_element_by_class_name('shareable-url-slug')
+        slug_field.send_keys(Keys.DELETE)
+        self.click(self.drv.find_element_by_class_name('save-survey-url'))
+
+        new_old_link = self.drv.find_element_by_id('shareable-link').text
+        self.assertEqual(
+            new_old_link,
+            'http://localhost:9999/enumerate/' + survey_id
+        )
+
+        self.get('/enumerate/slug')
+        self.assertIn('404', self.drv.page_source)
+
+    @report_success_status
+    def test_url_slug_collision(self):
+        user = (
+            self.session
+            .query(Administrator)
+            .get('b7becd02-1a3f-4c1d-a0e1-286ba121aef4')
+        )
+        with self.session.begin():
+            survey = construct_survey(
+                creator=user,
+                survey_type='public',
+                title={'English': 'slug playground'},
+            )
+            survey2 = construct_survey(
+                creator=user,
+                survey_type='public',
+                title={'English': 'slug already'},
+                url_slug='slug',
+            )
+            self.session.add_all([survey, survey2])
+
+        survey_id = survey.id
+
+        self.get('/admin/' + survey_id)
+
+        edit_btn = self.drv.find_element_by_class_name('glyphicon-pencil')
+        self.click(edit_btn)
+
+        slug_field = self.drv.find_element_by_class_name('shareable-url-slug')
+        slug_field.send_keys('slu')
+        self.sleep()
+        slug_field.send_keys('g')
+        self.sleep()
+
+        self.assertIn(
+            'disabled',
+            (
+                self.drv
+                .find_element_by_class_name('save-survey-url')
+                .get_attribute('class')
+            )
+        )
+        self.click(self.drv.find_element_by_class_name('save-survey-url'))
+
+        self.get('/enumerate/slug')
+        self.assertEqual(
+            self.drv.find_element_by_tag_name('h3').text,
+            'slug already'
+        )
 
     @report_success_status
     def test_download_json_button(self):
-        self.get('/view/b0816b52-204f-41d4-aaf0-ac6ae2970923')
+        self.get('/admin/b0816b52-204f-41d4-aaf0-ac6ae2970923')
 
-        self.click(self.drv.find_element_by_class_name('btn-sm'))
+        self.wait_for_element('btn-primary', by=By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('btn-primary'))
         self.click(self.drv.find_element_by_css_selector(
-            '.btn-group > ul:nth-child(2) > li:nth-child(1) > a:nth-child(1)'
+            '.open > ul:nth-child(2) > li:nth-child(1) > a:nth-child(1)'
         ))
+        self.sleep()
 
         self.switch_window()
+        self.sleep()
         response = BeautifulSoup(self.drv.page_source, 'html.parser')
-        json_str = response.find('pre').text
+        try:
+            json_str = response.find('pre').text
+        except AttributeError:
+            self.sleep()
+            response = BeautifulSoup(self.drv.page_source, 'html.parser')
+            json_str = response.find('pre').text
         data = json.loads(json_str)
 
         self.assertEqual(data['total_entries'], 101)
@@ -651,15 +979,20 @@ class TestAdminManageSurvey(AdminTest):
 
     @report_success_status
     def test_download_csv_button(self):
-        self.get('/view/b0816b52-204f-41d4-aaf0-ac6ae2970923')
+        self.get('/admin/b0816b52-204f-41d4-aaf0-ac6ae2970923')
 
-        self.click(self.drv.find_element_by_class_name('btn-sm'))
+        self.wait_for_element('btn-primary', by=By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('btn-primary'))
 
+        self.wait_for_element(
+            '.open > ul:nth-child(2) > li:nth-child(1) > a:nth-child(1)',
+            by=By.CSS_SELECTOR
+        )
         json_button = self.drv.find_element_by_css_selector(
-            '.btn-group > ul:nth-child(2) > li:nth-child(1) > a:nth-child(1)'
+            '.open > ul:nth-child(2) > li:nth-child(1) > a:nth-child(1)'
         )
         csv_button = self.drv.find_element_by_css_selector(
-            '.btn-group > ul:nth-child(2) > li:nth-child(2) > a:nth-child(1)'
+            '.open > ul:nth-child(2) > li:nth-child(2) > a:nth-child(1)'
         )
 
         self.assertEqual(
@@ -669,10 +1002,15 @@ class TestAdminManageSurvey(AdminTest):
 
     @report_success_status
     def test_submission_details_button(self):
-        self.get('/view/b0816b52-204f-41d4-aaf0-ac6ae2970923')
+        self.get('/admin/b0816b52-204f-41d4-aaf0-ac6ae2970923')
+        self.sleep()
 
+        self.wait_for_element(
+            '#submissions > tbody > tr:nth-of-type(1)',
+            by=By.CSS_SELECTOR
+        )
         self.click(self.drv.find_element_by_css_selector(
-            'tr.odd:nth-child(1) > td:nth-child(4) > button:nth-child(1)'
+            '#submissions > tbody > tr:nth-of-type(1)'
         ))
 
         self.wait_for_element('response-data', by=By.CLASS_NAME)
@@ -681,32 +1019,126 @@ class TestAdminManageSurvey(AdminTest):
             '3'
         )
 
+    @report_success_status
+    def test_change_language(self):
+        self.get('/admin/c0816b52-204f-41d4-aaf0-ac6ae2970925')
+
+        self.wait_for_element('UserDropdown')
+        self.click(self.drv.find_element_by_id('UserDropdown'))
+        self.sleep()
+
+        nav_list = self.drv.find_elements_by_class_name('nav-settings')
+        self.assertEqual(len(nav_list), 1)
+
+        self.sleep()
+        self.click(self.drv.find_element_by_class_name('nav-settings'))
+        self.wait_for_element('user-preferred-lang')
+        self.click(self.drv.find_element_by_css_selector(
+            '#user-preferred-lang option:nth-of-type(2)'))
+
+        save_btn = self.drv.find_element_by_class_name('btn-save-user')
+        self.sleep()
+        save_btn.click()
+        self.sleep()
+
+        # refresh the page
+        self.drv.refresh()
+        self.sleep()
+
+        self.assertEqual(
+            self.drv.find_element_by_class_name('survey-title').text,
+            'ENUMERATOR_ONLY_SINGLE_SURVEY'
+        )
+
+    @report_success_status
+    def test_language_defaults_to_survey_default(self):
+        """If the user's prefered language isn't available,
+        default to the survey's default_language"""
+
+        self.get('/admin/c0816b52-204f-41d4-aaf0-ac6ae2970925')
+        self.sleep(2)
+
+        self.wait_for_element('UserDropdown')
+        self.click(self.drv.find_element_by_id('UserDropdown'))
+        self.sleep()
+
+        nav_list = self.drv.find_elements_by_class_name('nav-settings')
+        self.assertEqual(len(nav_list), 1)
+
+        self.sleep()
+        self.click(self.drv.find_element_by_class_name('nav-settings'))
+        self.wait_for_element('user-preferred-lang')
+        self.click(self.drv.find_element_by_css_selector(
+            '#user-preferred-lang option:nth-of-type(3)'))
+
+        save_btn = self.drv.find_element_by_class_name('btn-save-user')
+        save_btn.click()
+        self.sleep()
+
+        # refresh the page
+        self.get('/admin/c0816b52-204f-41d4-aaf0-ac6ae2970925')
+        self.sleep()
+
+        self.assertEqual(
+            self.drv.find_element_by_class_name('survey-title').text,
+            'enumerator_only_single_survey (Russian)'
+        )
+
+    @report_success_status
+    def test_language_survey_specific(self):
+        """Check that a user's selection for a specific survey
+        overrides their preferred default language and the survey's
+        default_language."""
+
+        self.get('/admin/c0816b52-204f-41d4-aaf0-ac6ae2970925')
+        self.sleep(2)
+
+        # Set user preferred language
+        self.wait_for_element('UserDropdown')
+        self.click(self.drv.find_element_by_id('UserDropdown'))
+        self.sleep()
+        self.click(self.drv.find_element_by_class_name('nav-settings'))
+        self.wait_for_element('user-preferred-lang')
+        self.click(self.drv.find_element_by_css_selector(
+            '#user-preferred-lang option:nth-of-type(2)'))
+        save_btn = self.drv.find_element_by_class_name('btn-save-user')
+        self.sleep()
+        save_btn.click()
+        self.sleep()
+
+        # select a different language for this specific survey
+        self.wait_for_element('survey-language-dropdown')
+        self.sleep()
+        self.click(self.drv.find_element_by_id('survey-language-dropdown'))
+        lang_list = self.drv.find_elements_by_class_name('survey-language')
+        self.assertEqual(len(lang_list), 4)
+        self.click(lang_list[3])
+        self.sleep()
+
+        # test that the survey-specific language is displayed
+        self.assertEqual(
+            self.drv.find_element_by_class_name('survey-title').text,
+            'enumerator_only_single_survey (Russian)'
+        )
+
+        # navigate to overview page and check that the
+        # russian translation is present
+        self.get('/')
+        self.sleep(2)
+        self.drv.find_elements_by_xpath(
+            "//*[contains(text(),"
+            " 'enumerator_only_single_survey (Russian)')]")
+
 
 class TestAdminViewData(AdminTest):
     @report_success_status
     def test_view_data_renders_properly(self):
-        self.get('/view/data/b0816b52-204f-41d4-aaf0-ac6ae2970923')
+        self.get('/admin/data/b0816b52-204f-41d4-aaf0-ac6ae2970923')
         self.sleep()
-
-        # Stats view
-        stats = self.drv.find_elements_by_class_name('stat-value')
-
-        self.assertEqual(
-            dateutil.parser.parse(stats[0].text).date(),
-            datetime.datetime.now().date()
-        )
-        self.assertEqual(
-            dateutil.parser.parse(stats[1].text).date(),
-            datetime.datetime.now().date() - datetime.timedelta(days=99)
-        )
-        self.assertEqual(
-            dateutil.parser.parse(stats[2].text).date(),
-            datetime.datetime.now().date()
-        )
-        self.assertEqual(stats[3].text, '101')
 
         # Question data
         self.wait_for_element('question-title-bar', by=By.CLASS_NAME)
+
         titles = self.drv.find_elements_by_class_name('question-title-bar')
         self.assertListEqual(
             [q.text for q in titles],
@@ -725,6 +1157,29 @@ class TestAdminViewData(AdminTest):
             [s.text for s in q0_stats],
             ['1', '3', '3', '3', '3.0000000000000000', '3', '0', 'None']
         )
+
+        # Stats view
+        stats = self.drv.find_elements_by_class_name('stat-value')
+
+        self.assertEqual(
+            dateutil.parser.parse(stats[0].text).date(),
+            datetime.datetime.now().date()
+        )
+        earliest_utc = (
+            self.session
+            .query(Survey.earliest_submission_time)
+            .filter_by(id='b0816b52-204f-41d4-aaf0-ac6ae2970923')
+            .scalar()
+        )
+        self.assertEqual(
+            dateutil.parser.parse(stats[1].text).date(),
+            earliest_utc.astimezone(tzlocal()).date()
+        )
+        self.assertEqual(
+            dateutil.parser.parse(stats[2].text).date(),
+            datetime.datetime.now().date()
+        )
+        self.assertEqual(stats[3].text, '101')
 
 
 class TestEnumerate(DriverTest):
@@ -747,6 +1202,94 @@ class TestEnumerate(DriverTest):
             .limit(1)
             .one()
         )
+
+    @report_success_status
+    def test_login(self):
+        survey_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
+        self.get('/enumerate/{}'.format(survey_id))
+
+        # clicking login should bring user to login page
+        self.wait_for_element('menu', By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('menu'))
+        self.click(
+            self.drv
+            .find_element_by_class_name('menu_login')
+        )
+        self.sleep()
+        # on login page there should be two login buttons:
+        login_btn = self.drv.find_elements_by_class_name('btn-login')
+        self.assertEqual(len(login_btn), 2)
+
+        # login as enumerator
+        self.get('/debug/login/test_enumerator@fixtures.com')
+        self.sleep()
+
+        # return to survey and check that the logout option is there
+        # NOTE: logged-in query string gets appended in order to
+        # avoid caching issue.
+        self.get('/enumerate/{}?logged-in={}'.format(survey_id, 'cc'))
+        self.sleep()
+
+        self.wait_for_element('menu', By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('menu'))
+        self.drv.find_element_by_class_name('menu_logout')
+
+    @report_success_status
+    def test_logout(self):
+        survey_id = 'b0816b52-204f-41d4-aaf0-ac6ae2970923'
+
+        # login as enumerator
+        self.get('/debug/login/test_enumerator@fixtures.com')
+        self.sleep()
+
+        # open survey
+        self.get('/enumerate/{}'.format(survey_id))
+
+        # clicking logout should refresh the page
+        self.wait_for_element('menu', By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('menu'))
+        self.click(
+            self.drv
+            .find_element_by_class_name('menu_logout')
+        )
+        self.sleep()
+
+        # return to survey and check that the logout option is there
+        # self.get('/enumerate/{}'.format(survey_id))
+        self.wait_for_element('menu', By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('menu'))
+
+        self.drv.find_element_by_class_name('menu_login')
+
+    @report_success_status
+    def test_change_language(self):
+        survey_id = 'c0816b52-204f-41d4-aaf0-ac6ae2970925'
+
+        # login as enumerator
+        self.get('/debug/login/test_enumerator@fixtures.com')
+
+        self.get('/enumerate/{}'.format(survey_id))
+
+        self.wait_for_element('menu', By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('menu'))
+        self.click(
+            self.drv
+            .find_element_by_class_name('language_select')
+        )
+
+        self.assertEqual(
+            len(self.drv.find_elements_by_css_selector(
+                '.language_select option')), 3)
+
+        self.click(self.drv.find_elements_by_css_selector(
+            '.language_select option')[1])
+
+        self.sleep()
+
+        title = self.drv.find_element_by_css_selector(
+            '.content-padded h3').text
+
+        self.assertEqual(title, 'ENUMERATOR_ONLY_SINGLE_SURVEY')
 
     @report_success_status
     def test_single_integer_question(self):
@@ -933,6 +1476,7 @@ class TestEnumerate(DriverTest):
         existing_submission = self.get_last_submission(survey_id)
 
         self.get('/enumerate/{}'.format(survey_id))
+
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.wait_for_element('video', by=By.TAG_NAME, visible=True)
@@ -1006,8 +1550,6 @@ class TestEnumerate(DriverTest):
 
     @report_success_status
     def test_single_timestamp_question(self):
-        if self.browser == 'chrome':
-            raise unittest.SkipTest('Selenium + Chrome + timestamp == 😢')
         survey_id = self.get_single_node_survey_id('timestamp')
         existing_submission = self.get_last_submission(survey_id)
 
@@ -1067,9 +1609,9 @@ class TestEnumerate(DriverTest):
         existing_submission = self.get_last_submission(survey_id)
 
         self.get('/enumerate/{}'.format(survey_id))
+        self.set_geolocation()
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.set_geolocation()
         self.click(
             self.drv
             .find_element_by_css_selector(
@@ -1084,46 +1626,6 @@ class TestEnumerate(DriverTest):
         )
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.click(self.drv.find_elements_by_tag_name('button')[0])
-
-        new_submission = self.get_last_submission(survey_id)
-
-        self.assertIsNot(existing_submission, new_submission)
-        self.assertEqual(
-            new_submission.answers[0].response['response']['facility_name'],
-            'Queensborough Community College - City University of New York'
-        )
-
-    @report_success_status
-    def test_offline_facility_tree(self):
-        survey_id = self.get_single_node_survey_id('facility')
-        existing_submission = self.get_last_submission(survey_id)
-
-        self.get('/enumerate/{}'.format(survey_id))
-
-        self.toggle_online()
-
-        self.wait_for_element('navigate-right', By.CLASS_NAME)
-        self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.set_geolocation()
-        self.click(
-            self.drv
-            .find_element_by_css_selector(
-                '.content > span:nth-child(2) > span:nth-child(1)'
-                ' > div:nth-child(1) > button:nth-child(1)'
-            )
-        )
-        self.sleep()
-        self.wait_for_element('question__radio__label', by=By.CLASS_NAME)
-        self.click(
-            self.drv
-            .find_elements_by_class_name('question__radio__label')[0]
-        )
-        self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.click(self.drv.find_element_by_class_name('navigate-right'))
-
-        self.toggle_online(revisit=False)
-
         self.click(self.drv.find_elements_by_tag_name('button')[0])
 
         new_submission = self.get_last_submission(survey_id)
@@ -3682,51 +4184,56 @@ class TestEnumerate(DriverTest):
         existing_submission = self.get_last_submission(survey_id)
 
         self.get('/enumerate/{}'.format(survey_id))
+        self.set_geolocation()
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.set_geolocation()
+        # wait for add button
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
+        )
+        # click add button
         self.click(
             self.drv
-            .find_element_by_css_selector(
-                '.content > span:nth-child(2) > span:nth-child(1)'
-                ' > div:nth-child(1) > button:nth-child(1)'
-            )
+            .find_element_by_class_name('btn-add-facility')
         )
         self.sleep()
-        self.click(
-            self.drv
-            .find_element_by_css_selector(
-                'div.content-padded:nth-child(3) > button:nth-child(1)'
-            )
+
+        # wait for form
+        self.wait_for_element(
+            '.btn-cancel',
+            by=By.CSS_SELECTOR
         )
+        # enter new facility text
         (
             self.drv
             .find_elements_by_tag_name('input')[0]
             .send_keys('new facility')
         )
-        self.click(self.drv.find_elements_by_tag_name('option')[1])
 
+        # navigate to end of survey and save
+        self.click(self.drv.find_elements_by_tag_name('option')[1])
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
+
+        # click submit button on splash screen
         self.click(self.drv.find_elements_by_tag_name('button')[0])
 
+        # check that the new submission was added successfully
         new_submission = self.get_last_submission(survey_id)
-
         self.assertIsNot(existing_submission, new_submission)
         self.assertEqual(
             new_submission.answers[0].response['response']['facility_name'],
             'new facility'
         )
 
+        # navigate back to facility question, check that the new facility
+        # is there
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.click(
-            self.drv
-            .find_element_by_css_selector(
-                '.content > span:nth-child(2) > span:nth-child(1)'
-                ' > div:nth-child(1) > button:nth-child(1)'
-            )
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
         )
-
         new_facility_text = (
             self.drv
             .find_elements_by_class_name('question__radio__label')[0]
@@ -3740,33 +4247,153 @@ class TestEnumerate(DriverTest):
         existing_submission = self.get_last_submission(survey_id)
 
         self.get('/enumerate/{}'.format(survey_id))
+        self.set_geolocation()
         self.toggle_online(browser=False, revisit=True)
         self.wait_for_element('navigate-right', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.set_geolocation()
+        # wait for add button
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
+        )
+        # click add button
         self.click(
             self.drv
-            .find_element_by_css_selector(
-                '.content > span:nth-child(2) > span:nth-child(1)'
-                ' > div:nth-child(1) > button:nth-child(1)'
-            )
+            .find_element_by_class_name('btn-add-facility')
         )
         self.sleep()
-        self.click(
-            self.drv
-            .find_element_by_css_selector(
-                'div.content-padded:nth-child(3) > button:nth-child(1)'
-            )
-        )
+        # enter new facility text
         (
             self.drv
             .find_elements_by_tag_name('input')[0]
             .send_keys('new facility')
         )
+        # navigate to end of survey and save
         self.click(self.drv.find_elements_by_tag_name('option')[1])
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
 
+        # click submit button on splash screen
+        self.click(self.drv.find_elements_by_tag_name('button')[0])
+
+        # check that the new submission was added successfully
+        new_submission = self.get_last_submission(survey_id)
+        self.assertIsNot(existing_submission, new_submission)
+        self.assertEqual(
+            new_submission.answers[0].response['response']['facility_name'],
+            'new facility'
+        )
+
+        # navigate back to facility question, check that the new facility
+        # is there
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
+        )
+        new_facility_text = (
+            self.drv
+            .find_elements_by_class_name('question__radio__label')[0]
+            .text
+        )
+        self.assertEqual(new_facility_text.split('\n')[0], 'new facility')
+
+    @report_success_status
+    def test_revisit_offline_then_online(self):
+        """If we start with revisit offline, no facility tree is created.
+        We should still be able to add a Facility, and see the Facility in
+        the list later on.
+
+        If/when revisit comes back online later, the newly added Facility
+        should be included in the facility tree.
+        """
+        survey_id = self.get_single_node_survey_id('facility')
+        existing_submission = self.get_last_submission(survey_id)
+        # revisit is offline:
+        self.toggle_online(browser=False, revisit=True)
+        # navigate to page
+        self.get('/enumerate/{}'.format(survey_id))
+        self.set_geolocation()
+        self.wait_for_element('navigate-right', By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+
+        # wait for add button
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
+        )
+        # click add button
+        self.click(
+            self.drv
+            .find_element_by_class_name('btn-add-facility')
+        )
+        self.sleep()
+        # enter new facility text
+        (
+            self.drv
+            .find_elements_by_tag_name('input')[0]
+            .send_keys('new facility')
+        )
+        # navigate to end of survey and save
+        self.click(self.drv.find_elements_by_tag_name('option')[1])
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
+
+        # click submit button on splash screen
+        self.click(self.drv.find_elements_by_tag_name('button')[0])
+
+        # check that the new submission was added successfully
+        new_submission = self.get_last_submission(survey_id)
+        self.assertIsNot(existing_submission, new_submission)
+        self.assertEqual(
+            new_submission.answers[0].response['response']['facility_name'],
+            'new facility'
+        )
+
+        # turn revisit back on:
+        self.toggle_online(browser=False, revisit=True)
+
+        # navigate back to facility question, check that the new facility
+        # is there
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
+        )
+        new_facility_text = (
+            self.drv
+            .find_elements_by_class_name('question__radio__label')[0]
+            .text
+        )
+        self.assertEqual(new_facility_text.split('\n')[0], 'new facility')
+
+    @report_success_status
+    def test_offline_facility_tree(self):
+        survey_id = self.get_single_node_survey_id('facility')
+        existing_submission = self.get_last_submission(survey_id)
+
+        self.get('/enumerate/{}'.format(survey_id))
+        self.set_geolocation()
+        self.toggle_online()
+
+        self.wait_for_element('navigate-right', By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+        # wait for add button
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
+        )
+
+        self.wait_for_element('question__radio__label', by=By.CLASS_NAME)
+        self.click(
+            self.drv
+            .find_elements_by_class_name('question__radio__label')[0]
+        )
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+
+        self.toggle_online(revisit=False)
+
         self.click(self.drv.find_elements_by_tag_name('button')[0])
 
         new_submission = self.get_last_submission(survey_id)
@@ -3774,22 +4401,178 @@ class TestEnumerate(DriverTest):
         self.assertIsNot(existing_submission, new_submission)
         self.assertEqual(
             new_submission.answers[0].response['response']['facility_name'],
+            'Queensborough Community College - City University of New York'
+        )
+
+
+class TestEnumerateOfflineRevisit(DriverTest):
+    def setUp(self):
+        super().setUp()
+
+        try:
+            urlopen(
+                'http://localhost:9999/debug/toggle_facilities?state=false'
+            )
+        except urllib.error.URLError:
+            pass
+
+    def tearDown(self):
+        super().tearDown()
+
+        try:
+            urlopen(
+                'http://localhost:9999/debug/toggle_facilities?state=true'
+            )
+        except urllib.error.URLError:
+            pass
+
+    def get_single_node_survey_id(self, question_type):
+        title = question_type + '_survey'
+        return (
+            self.session
+            .query(Survey.id)
+            .filter(Survey.title['English'].astext == title)
+            .scalar()
+        )
+
+    def get_last_submission(self, survey_id):
+        self.sleep()
+        return (
+            self.session
+            .query(Submission)
+            .filter_by(survey_id=survey_id)
+            .order_by(Submission.save_time.desc())
+            .limit(1)
+            .one()
+        )
+
+    @report_success_status
+    def test_revisit_offline_entirely(self):
+        """If we start with revisit offline, no facility tree is created.
+        We should still be able to add a Facility, see the Facility in
+        the list later on, and save/submit the submission.
+        """
+        survey_id = self.get_single_node_survey_id('facility')
+        existing_submission = self.get_last_submission(survey_id)
+        # navigate to page
+        self.get('/enumerate/{}'.format(survey_id))
+        self.set_geolocation()
+        self.wait_for_element('navigate-right', By.CLASS_NAME)
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+
+        # wait for add button
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
+        )
+        # click add button
+        self.click(
+            self.drv
+            .find_element_by_class_name('btn-add-facility')
+        )
+        self.sleep()
+        # enter new facility text
+        (
+            self.drv
+            .find_elements_by_tag_name('input')[0]
+            .send_keys('new facility')
+        )
+        # navigate to end of survey and save
+        self.click(self.drv.find_elements_by_tag_name('option')[1])
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+        self.click(self.drv.find_element_by_class_name('navigate-right'))
+
+        # click submit button on splash screen
+        self.click(self.drv.find_elements_by_tag_name('button')[0])
+
+        # check that the new submission was added successfully
+        new_submission = self.get_last_submission(survey_id)
+        self.assertIsNot(existing_submission, new_submission)
+        self.assertEqual(
+            new_submission.answers[0].response['response']['facility_name'],
             'new facility'
         )
 
+        # navigate back to facility question, check that the new facility
+        # is there
         self.click(self.drv.find_element_by_class_name('navigate-right'))
-        self.click(
-            self.drv
-            .find_element_by_css_selector(
-                '.content > span:nth-child(2) > span:nth-child(1)'
-                ' > div:nth-child(1) > button:nth-child(1)'
-            )
+        self.wait_for_element(
+            '.btn-add-facility',
+            by=By.CSS_SELECTOR
         )
-
-        self.wait_for_element('question__radio__label', by=By.CLASS_NAME)
         new_facility_text = (
             self.drv
             .find_elements_by_class_name('question__radio__label')[0]
             .text
         )
         self.assertEqual(new_facility_text.split('\n')[0], 'new facility')
+
+
+class TestEnumerateSlowRevisit(DriverTest):
+    def setUp(self):
+        super().setUp()
+
+        try:
+            urlopen(
+                'http://localhost:9999/debug/toggle_revisit_slow?state=true'
+            )
+        except urllib.error.URLError:
+            pass
+
+    def tearDown(self):
+        super().tearDown()
+
+        try:
+            urlopen(
+                'http://localhost:9999/debug/toggle_revisit_slow?state=false'
+            )
+        except urllib.error.URLError:
+            pass
+
+    def get_single_node_survey_id(self, question_type):
+        title = question_type + '_survey'
+        return (
+            self.session
+            .query(Survey.id)
+            .filter(Survey.title['English'].astext == title)
+            .scalar()
+        )
+
+    @report_success_status
+    def test_single_facility_question_loading(self):
+        survey_id = self.get_single_node_survey_id('facility')
+
+        start_time = time.time()
+        self.get('/enumerate/{}'.format(survey_id))
+        overlay = self.drv.find_elements_by_class_name('loading-overlay')
+        finish_time = time.time()
+
+        self.assertGreater(finish_time - start_time, 2)
+
+        # overlay should not be present
+        self.assertEqual(len(overlay), 0)
+
+    @report_success_status
+    def test_facilities_only_fetched_on_first_load(self):
+        """Facilities should only be fetched automatically from revisit on the
+        first page load. After that it should be manual.
+        """
+        survey_id = self.get_single_node_survey_id('facility')
+
+        # first load, should be slow because revisit is hit
+        start_time = time.time()
+        self.get('/enumerate/{}'.format(survey_id))
+        overlay = self.drv.find_elements_by_class_name('loading-overlay')
+        finish_time = time.time()
+
+        self.assertGreater(finish_time - start_time, 2)
+        # overlay should not be present
+        self.assertEqual(len(overlay), 0)
+
+        # second load, should be fast because revisit is not hit
+        start_time = time.time()
+        self.drv.refresh()
+        overlay = self.drv.find_elements_by_class_name('loading-overlay')
+        finish_time = time.time()
+
+        self.assertLess(finish_time - start_time, 2)

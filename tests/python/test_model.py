@@ -30,7 +30,7 @@ from dokomoforms.models.answer import IntegerAnswer
 import dokomoforms.exc as exc
 from dokomoforms.models.survey import Bucket
 from dokomoforms.models.util import column_search
-from dokomoforms.handlers.api.serializer import ModelJSONSerializer
+from dokomoforms.handlers.api.v0.serializer import ModelJSONSerializer
 
 
 class TestBase(unittest.TestCase):
@@ -58,14 +58,13 @@ class TestBase(unittest.TestCase):
         )
 
     def test_create_engine(self):
-        from dokomoforms.options import options
         engine1 = models.create_engine()
-        self.assertEqual(engine1.echo, 'debug' if options.debug else False)
+        self.assertEqual(engine1.echo, None)
 
-        engine2 = models.create_engine(True)
+        engine2 = models.create_engine(echo=True)
         self.assertEqual(engine2.echo, True)
 
-        engine3 = models.create_engine(False)
+        engine3 = models.create_engine(echo=False)
         self.assertEqual(engine3.echo, False)
 
         self.assertEqual(engine3.pool.size(), 5)
@@ -115,7 +114,8 @@ class TestUtil(DokoTest):
 
         like_search = column_search(
             self.session.query(models.Node),
-            model_cls=models.Node, column_name='title', search_term='%'
+            model_cls=models.Node, column_name='title', search_term='%',
+            language='English',
         ).all()
         self.assertEqual(len(like_search), 1, msg=like_search)
         found_node = like_search[0]
@@ -144,7 +144,8 @@ class TestUtil(DokoTest):
 
         like_search = column_search(
             self.session.query(models.Node),
-            model_cls=models.Node, column_name='title', search_term='_'
+            model_cls=models.Node, column_name='title', search_term='_',
+            language='English',
         ).all()
         self.assertEqual(len(like_search), 1, msg=like_search)
         found_node = like_search[0]
@@ -173,7 +174,8 @@ class TestUtil(DokoTest):
 
         like_search = column_search(
             self.session.query(models.Node),
-            model_cls=models.Node, column_name='title', search_term='\\'
+            model_cls=models.Node, column_name='title', search_term='\\',
+            language='English',
         ).all()
         self.assertEqual(len(like_search), 1, msg=like_search)
         found_node = like_search[0]
@@ -213,7 +215,7 @@ class TestColumnProperties(DokoTest):
             survey = self.session.query(models.Survey).one()
             survey.submissions.append(
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     answers=[
                         models.construct_answer(
                             survey_node=survey.nodes[0],
@@ -249,7 +251,7 @@ class TestColumnProperties(DokoTest):
             self.session.add(creator)
 
             submission = models.construct_submission(
-                submission_type='unauthenticated',
+                submission_type='public_submission',
                 survey=creator.surveys[0],
                 answers=[
                     models.construct_answer(
@@ -279,7 +281,7 @@ class TestColumnProperties(DokoTest):
             survey = self.session.query(models.Survey).one()
             survey.submissions.append(
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     survey=survey,
                     answers=[
                         models.construct_answer(
@@ -301,7 +303,7 @@ class TestColumnProperties(DokoTest):
             survey = self.session.query(models.Survey).one()
             survey.submissions.append(
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     survey=survey,
                     answers=[
                         models.construct_answer(
@@ -350,7 +352,7 @@ class TestColumnProperties(DokoTest):
             self.session.flush()
 
             submission = models.construct_submission(
-                submission_type='unauthenticated',
+                submission_type='public_submission',
                 survey=creator.surveys[0],
                 answers=[
                     models.construct_answer(
@@ -373,7 +375,7 @@ class TestColumnProperties(DokoTest):
             survey = self.session.query(models.Survey).one()
             survey.submissions.extend(
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     survey=survey,
                     answers=[
                         models.construct_answer(
@@ -587,6 +589,7 @@ class TestUser(DokoTest):
                 ('allowed_surveys', []),
                 ('last_update_time', user.last_update_time),
                 ('surveys', [self.session.query(models.Survey.id).scalar()]),
+                ('admin_surveys', []),
                 ('token_expiration', user.token_expiration),
             )),
             msg=user
@@ -617,6 +620,10 @@ class TestUser(DokoTest):
                 ('allowed_surveys', []),
                 ('last_update_time', admin.last_update_time),
                 ('surveys', []),
+                (
+                    'admin_surveys',
+                    [self.session.query(models.Survey.id).scalar()]
+                ),
                 ('token_expiration', admin.token_expiration),
             )),
             msg=admin
@@ -737,11 +744,11 @@ class TestUser(DokoTest):
                             administrators=[models.Administrator(name='adm')],
                             submissions=[
                                 models.construct_submission(
-                                    submission_type='unauthenticated',
+                                    submission_type='public_submission',
                                     submitter_name='sub1',
                                 ),
                                 models.construct_submission(
-                                    submission_type='unauthenticated',
+                                    submission_type='public_submission',
                                     submitter_name='sub2',
                                 ),
                             ],
@@ -751,11 +758,11 @@ class TestUser(DokoTest):
                             title={'English': 'public survey too'},
                             submissions=[
                                 models.construct_submission(
-                                    submission_type='unauthenticated',
+                                    submission_type='public_submission',
                                     submitter_name='sub3',
                                 ),
                                 models.construct_submission(
-                                    submission_type='unauthenticated',
+                                    submission_type='public_submission',
                                     submitter_name='sub4',
                                 ),
                             ],
@@ -770,11 +777,11 @@ class TestUser(DokoTest):
                             title={'English': 'not this survey'},
                             submissions=[
                                 models.construct_submission(
-                                    submission_type='unauthenticated',
+                                    submission_type='public_submission',
                                     submitter_name='sub5',
                                 ),
                                 models.construct_submission(
-                                    submission_type='unauthenticated',
+                                    submission_type='public_submission',
                                     submitter_name='sub6',
                                 ),
                             ],
@@ -1530,10 +1537,10 @@ class TestSurvey(DokoTest):
             survey = self.session.query(models.Survey).one()
             survey.submissions.extend([
                 models.construct_submission(
-                    submission_type='unauthenticated'
+                    submission_type='public_submission'
                 ),
                 models.construct_submission(
-                    submission_type='unauthenticated'
+                    submission_type='public_submission'
                 ),
             ])
             self.session.add(survey)
@@ -1570,11 +1577,11 @@ class TestSurvey(DokoTest):
             survey = self.session.query(models.Survey).one()
             survey.submissions.extend([
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     save_time=dateutil.parser.parse('2015/7/29 1:00'),
                 ),
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     save_time=dateutil.parser.parse('2015/7/29 2:00'),
                 ),
             ])
@@ -1618,11 +1625,11 @@ class TestSurvey(DokoTest):
             survey = self.session.query(models.Survey).one()
             survey.submissions.extend([
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     save_time=dateutil.parser.parse('2015/7/29 1:00'),
                 ),
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     save_time=dateutil.parser.parse('2015/7/29 2:00'),
                 ),
             ])
@@ -1762,7 +1769,7 @@ class TestSurvey(DokoTest):
                 )
 
     def test_url_slug_invalid_character(self):
-        for bad_character in ';/?:@&=+$, ':
+        for bad_character in '%#;/?:@&=+$, ':
             with self.subTest(bad_character=bad_character):
                 with self.assertRaises(IntegrityError):
                     with self.session.begin():
@@ -1794,6 +1801,22 @@ class TestSurvey(DokoTest):
                                 survey_type='public',
                                 title={'English': 'url_slug'},
                                 url_slug=str(uuid.uuid4()),
+                            ),
+                        ],
+                    )
+                )
+
+    def test_url_slug_is_not_empty_string(self):
+        with self.assertRaises(IntegrityError):
+            with self.session.begin():
+                self.session.add(
+                    models.Administrator(
+                        name='creator',
+                        surveys=[
+                            models.construct_survey(
+                                survey_type='public',
+                                title={'English': 'url_slug'},
+                                url_slug='',
                             ),
                         ],
                     )
@@ -1938,6 +1961,7 @@ class TestSurvey(DokoTest):
             OrderedDict((
                 ('id', the_survey.id),
                 ('deleted', False),
+                ('languages', ('English',)),
                 ('title', OrderedDict((('English', 'some survey'),))),
                 ('url_slug', None),
                 ('default_language', 'English'),
@@ -2165,7 +2189,7 @@ class TestSurvey(DokoTest):
         with self.session.begin():
             survey.submissions.append(
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     answers=[
                         models.construct_answer(
                             type_constraint='integer',
@@ -2234,7 +2258,7 @@ class TestSurvey(DokoTest):
         with self.session.begin():
             survey.submissions.append(
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     answers=[
                         models.construct_answer(
                             type_constraint='integer',
@@ -2300,7 +2324,7 @@ class TestSurveyNode(DokoTest):
             survey = self.session.query(models.Survey).one()
             survey.submissions.append(
                 models.construct_submission(
-                    submission_type='unauthenticated',
+                    submission_type='public_submission',
                     answers=[
                         models.construct_answer(
                             survey_node=survey.nodes[0],
@@ -2606,6 +2630,7 @@ class TestSurveyNode(DokoTest):
             OrderedDict((
                 ('id', survey.id),
                 ('deleted', False),
+                ('languages', ['French']),
                 ('title', OrderedDict((('French', 'french title'),))),
                 ('url_slug', None),
                 ('default_language', 'French'),
@@ -3984,7 +4009,7 @@ class TestAnswer(DokoTest):
             with self.session.begin():
                 survey1.submissions.append(
                     models.construct_submission(
-                        submission_type='unauthenticated',
+                        submission_type='public_submission',
                         answers=[
                             models.construct_answer(
                                 survey_node=survey2.nodes[0],
@@ -4432,16 +4457,11 @@ class TestAnswer(DokoTest):
 
             self.session.add(submission)
 
-        local_offset = (
-            dateutil.tz.tzlocal()
-            .utcoffset(datetime.datetime.now())
-            .total_seconds() / 60
-        )
         self.assertEqual(
             self.session.query(models.Answer).one().answer,
             datetime.time(
                 13, 57,
-                tzinfo=psycopg2.tz.FixedOffsetTimezone(offset=local_offset)
+                tzinfo=psycopg2.tz.FixedOffsetTimezone(offset=0)
             )
         )
 
@@ -4478,16 +4498,11 @@ class TestAnswer(DokoTest):
 
             self.session.add(submission)
 
-        local_offset = (
-            dateutil.tz.tzlocal()
-            .utcoffset(datetime.datetime.now())
-            .total_seconds() / 60
-        )
         self.assertEqual(
             self.session.query(models.Answer).one().answer,
             datetime.datetime(
                 2015, 6, 22, 13, 57,
-                tzinfo=psycopg2.tz.FixedOffsetTimezone(offset=local_offset)
+                tzinfo=psycopg2.tz.FixedOffsetTimezone(offset=0)
             )
         )
 

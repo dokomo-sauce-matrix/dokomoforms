@@ -100,6 +100,7 @@ sa.event.listen(
     # Creating extensions in pg_catalog makes them available to the entire
     # database without any prefix.
     sa.DDL(
+        'ALTER DATABASE {db} SET TIMEZONE TO "UTC";'
         'CREATE SCHEMA IF NOT EXISTS public;'
         'CREATE SCHEMA IF NOT EXISTS {schema};'
         'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'  # UUID columns
@@ -109,7 +110,7 @@ sa.event.listen(
         'CREATE EXTENSION IF NOT EXISTS "postgis";'  # Geometry columns
         'CREATE EXTENSION IF NOT EXISTS "btree_gist"'  # Exclusion constraints
         ' WITH SCHEMA pg_catalog;'
-        .format(schema=options.schema)
+        .format(db=options.db_database, schema=options.schema)
     ),
 )
 
@@ -172,24 +173,16 @@ class ModelJSONEncoder(json.JSONEncoder):
             return super().default(obj)
 
 
-def create_engine(echo: bool=None,
-                  pool_size: int=None,
-                  max_overflow: int=None) -> sqlalchemy.engine.Engine:
+def create_engine(pool_size: int=None,
+                  max_overflow: int=None,
+                  echo: bool=None) -> sqlalchemy.engine.Engine:
     """Get a connection to the database.
 
     Return a sqlalchemy.engine.Engine configured with the options set in
     dokomoforms.options.options
 
-    :param echo: whether to print to the command line all of the SQL generated
-                 by SQLAlchemy. Defaults to None, which defers to the
-                 options.debug setting. Setting this parameter to True or False
-                 (or 'debug') overrides the echo setting of options.debug.
     :return: a SQLAlchemy engine
     """
-    if echo is None:
-        # This causes duplicate log messages, but I can't figure out how to get
-        # the same level of logging otherwise...
-        echo = 'debug' if options.debug else False
     connection_string = 'postgresql+psycopg2://{}:{}@{}:{}/{}'.format(
         options.db_user,
         options.db_password,
@@ -199,7 +192,9 @@ def create_engine(echo: bool=None,
     )
     pool_size = pool_size or options.pool_size
     max_overflow = max_overflow or options.max_overflow
-    engine_params = {'echo': echo}
+    engine_params = dict()
+    if echo is not None:
+        engine_params['echo'] = echo
     if pool_size is not None:
         engine_params['pool_size'] = pool_size
     if max_overflow is not None:
@@ -350,25 +345,9 @@ def column_search(query, *,
         ))
     # JSONB column
     if str(column.type) == 'JSONB':
-        # Search across languages
         if language is None:
-            query = (
-                query
-                .select_from(
-                    model_cls, func.jsonb_each_text(column).alias('search')
-                )
-            )
-            if regex:
-                return (
-                    query.
-                    filter(sa.text('search.value ~* :search_term'))
-                    .params(search_term=search_term)
-                )
-            return (
-                query
-                .filter(sa.text("search.value ILIKE :search_term"))
-                .params(search_term='%{}%'.format(search_term))
-            )
+            # note that Node has no default_language
+            language = model_cls.default_language
         # Search for a specific language
         if regex:
             return (

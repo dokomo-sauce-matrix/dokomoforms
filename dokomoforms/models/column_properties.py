@@ -24,6 +24,23 @@ Answer.question_title = column_property(
 )
 
 
+# Submission
+Submission.survey_title = column_property(
+    sa.select([Survey.title])
+    .where(Survey.id == Submission.survey_id)
+    .correlate_except(Survey)
+    .label('survey_title')
+)
+
+
+Submission.survey_default_language = column_property(
+    sa.select([Survey.default_language])
+    .where(Survey.id == Submission.survey_id)
+    .correlate_except(Survey)
+    .label('survey_default_language')
+)
+
+
 # Survey
 Survey.num_submissions = column_property(
     sa.select([sa.func.count(Submission.id)])
