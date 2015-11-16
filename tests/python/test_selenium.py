@@ -24,13 +24,14 @@ from passlib.hash import bcrypt_sha256
 
 from selenium import webdriver
 from selenium.common.exceptions import (
-    TimeoutException, ElementNotVisibleException
+    TimeoutException, ElementNotVisibleException, WebDriverException
 )
 from selenium.webdriver import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.select import Select
 
 import tests.python.util
 from tests.python.util import setUpModule, tearDownModule
@@ -1038,7 +1039,8 @@ class TestAdminManageSurvey(AdminTest):
         self.click(self.drv.find_element_by_class_name('nav-settings'))
         self.wait_for_element('user-preferred-lang')
         self.click(self.drv.find_element_by_css_selector(
-            '#user-preferred-lang option:nth-of-type(2)'))
+            '#user-preferred-lang option:nth-of-type(2)'
+        ))
 
         save_btn = self.drv.find_element_by_class_name('btn-save-user')
         self.sleep()
@@ -1276,17 +1278,18 @@ class TestEnumerate(DriverTest):
 
         self.wait_for_element('menu', By.CLASS_NAME)
         self.click(self.drv.find_element_by_class_name('menu'))
-        self.click(
-            self.drv
-            .find_element_by_class_name('language_select')
-        )
-
-        self.assertEqual(
-            len(self.drv.find_elements_by_css_selector(
-                '.language_select option')), 3)
-
-        self.click(self.drv.find_elements_by_css_selector(
-            '.language_select option')[1])
+        lang = Select(self.drv.find_element_by_class_name('language_select'))
+        self.assertEqual(len(lang.options), 3)
+        # For some reason on Android selecting an option works but raises an
+        # exception...
+        # So... ignore the exception!
+        try:
+            lang.select_by_index(1)
+        except WebDriverException:
+            if self.browser == 'android':
+                pass
+            else:
+                raise
 
         self.sleep()
 
@@ -2254,28 +2257,14 @@ class TestEnumerate(DriverTest):
         # TODO: change this behavior
         alert = self.drv.switch_to.alert
         alert.accept()
+        if self.browser == 'android':
+            self.sleep()
 
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_elements_by_tag_name('input')[0]
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys('3')
-            .perform()
+        self.drv.find_elements_by_tag_name('input')[0].send_keys(
+            Keys.BACK_SPACE * 14, '3'
         )
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_elements_by_tag_name('input')[-1]
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys('4')
-            .perform()
+        self.drv.find_elements_by_tag_name('input')[-1].send_keys(
+            Keys.BACK_SPACE * 13, '4'
         )
 
         self.click(self.drv.find_element_by_class_name('navigate-right'))
@@ -2776,16 +2765,8 @@ class TestEnumerate(DriverTest):
             'integer_0'
         )
 
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys('15')
-            .perform()
+        self.drv.find_element_by_tag_name('input').send_keys(
+            Keys.BACK_SPACE * 2, '15'
         )
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.assertEqual(
