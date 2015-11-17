@@ -3905,17 +3905,7 @@ class TestEnumerate(DriverTest):
             1
         )
 
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys('2')
-            .perform()
-        )
+        self.input_field().send_keys(Keys.BACK_SPACE, '2')
 
         self.assertEqual(
             len(self.drv.find_elements_by_css_selector('input:invalid')),
@@ -3926,17 +3916,7 @@ class TestEnumerate(DriverTest):
             0
         )
 
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys('12')
-            .perform()
-        )
+        self.input_field().send_keys(Keys.BACK_SPACE, '12')
 
         self.assertEqual(
             len(self.drv.find_elements_by_css_selector('input:invalid')),
@@ -4004,17 +3984,7 @@ class TestEnumerate(DriverTest):
                 .send_keys(Keys.LEFT, Keys.LEFT)
             )
         else:
-            (
-                ActionChains(self.drv)
-                .key_down(
-                    self.control_key,
-                    self.drv.find_element_by_tag_name('input')
-                )
-                .send_keys('a')
-                .key_up(self.control_key)
-                .send_keys(Keys.DELETE)
-                .perform()
-            )
+            self.input_field().send_keys(Keys.BACK_SPACE * 10)
         self.enter_date(
             self.drv.find_element_by_tag_name('input'),
             '2015', '09', '02'
@@ -4036,17 +4006,7 @@ class TestEnumerate(DriverTest):
                 .send_keys(Keys.LEFT, Keys.LEFT)
             )
         else:
-            (
-                ActionChains(self.drv)
-                .key_down(
-                    self.control_key,
-                    self.drv.find_element_by_tag_name('input')
-                )
-                .send_keys('a')
-                .key_up(self.control_key)
-                .send_keys(Keys.DELETE)
-                .perform()
-            )
+            self.input_field().send_keys(Keys.BACK_SPACE * 10)
         self.enter_date(
             self.drv.find_element_by_tag_name('input'),
             '2015', '09', '12'
