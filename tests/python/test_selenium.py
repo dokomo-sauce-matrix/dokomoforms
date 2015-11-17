@@ -303,6 +303,9 @@ class DriverTest(tests.python.util.DokoExternalDBTest):
             urlopen('http://localhost:9999/debug/toggle_facilities')
         self.sleep(1)
 
+    def input_field(self):
+        return self.drv.find_element_by_tag_name('input')
+
     @property
     def control_key(self):
         is_osx = self.platform.startswith('OS X')
@@ -3227,34 +3230,14 @@ class TestEnumerate(DriverTest):
             'b0'
         )
         self.click(self.drv.find_element_by_class_name('page_nav__prev'))
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys('4.2')
-            .perform()
-        )
+        self.input_field().send_keys(Keys.BACK_SPACE * 3, '4.2')
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.assertEqual(
             self.drv.find_element_by_tag_name('h3').text,
             'b1'
         )
         self.click(self.drv.find_element_by_class_name('page_nav__prev'))
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys('1.2')
-            .perform()
-        )
+        self.input_field().send_keys(Keys.BACK_SPACE * 3, '1.2')
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.assertEqual(
             self.drv.find_element_by_tag_name('h3').text,
