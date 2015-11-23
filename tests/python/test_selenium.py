@@ -3486,17 +3486,7 @@ class TestEnumerate(DriverTest):
             'b0'
         )
         self.click(self.drv.find_element_by_class_name('page_nav__prev'))
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys(Keys.DELETE)
-            .perform()
-        )
+        self.input_field().send_keys(Keys.RIGHT * 30, Keys.BACK_SPACE * 30)
         self.enter_timestamp(
             self.drv.find_element_by_tag_name('input'),
             '2015-11-22T01:00:00'
@@ -3507,17 +3497,7 @@ class TestEnumerate(DriverTest):
             'b1'
         )
         self.click(self.drv.find_element_by_class_name('page_nav__prev'))
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys(Keys.DELETE)
-            .perform()
-        )
+        self.input_field().send_keys(Keys.RIGHT * 30, Keys.BACK_SPACE * 30)
         self.enter_timestamp(
             self.drv.find_element_by_tag_name('input'),
             '2015-01-05T01:00:00'
@@ -3545,17 +3525,7 @@ class TestEnumerate(DriverTest):
             'b0'
         )
         self.click(self.drv.find_element_by_class_name('page_nav__prev'))
-        (
-            ActionChains(self.drv)
-            .key_down(
-                self.control_key,
-                self.drv.find_element_by_tag_name('input')
-            )
-            .send_keys('a')
-            .key_up(self.control_key)
-            .send_keys(Keys.DELETE)
-            .perform()
-        )
+        self.input_field().send_keys(Keys.RIGHT * 30, Keys.BACK_SPACE * 30)
         self.enter_timestamp(
             self.drv.find_element_by_tag_name('input'),
             '2070-01-05T01:00:00'
