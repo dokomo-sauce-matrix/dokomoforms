@@ -369,13 +369,18 @@ class DriverTest(tests.python.util.DokoExternalDBTest):
             element.send_keys('{}:{} {}'.format(hour, minute, am_pm))
 
     def enter_timestamp(self, element, timestamp):
-        utc_offset = float(self.drv.execute_script(
-            'return (new Date()).getTimezoneOffset()'
-        ))
+        modified_time_str = self.drv.execute_script(
+            'return moment("{}").format();'.format(timestamp)
+        )
+        modified_time = dateutil.parser.parse(modified_time_str)
+        unmodified_time = (
+            dateutil.parser.parse(timestamp).replace(tzinfo=pytz.utc)
+        )
+        utc_offset = (modified_time - unmodified_time).seconds
         utc_offset_time = (
             dateutil.parser.
             parse(timestamp).
-            replace(tzinfo=tzoffset(None, utc_offset * 60))
+            replace(tzinfo=tzoffset(None, utc_offset))
         )
         utc_time = utc_offset_time.astimezone(pytz.utc)
 
@@ -1643,7 +1648,7 @@ class TestEnumerate(DriverTest):
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.enter_timestamp(
             self.drv.find_element_by_tag_name('input'),
-            '2015-08-11T23:03:33'
+            '2015-08-11T15:33:00'
         )
         self.click(self.drv.find_element_by_class_name('navigate-right'))
         self.click(self.drv.find_element_by_class_name('navigate-right'))
@@ -1653,12 +1658,7 @@ class TestEnumerate(DriverTest):
 
         self.assertIsNot(existing_submission, new_submission)
         answer = new_submission.answers[0].answer
-        date_answer = answer.date()
-        self.assertEqual(date_answer.isoformat(), '2015-08-11')
-        time_answer = answer.timetz()
-        answer_parts = re.split('[-+]', time_answer.isoformat())
-        self.assertEqual(len(answer_parts), 2, msg=answer_parts)
-        self.assertEqual(answer_parts[0], '15:33:00')
+        self.assertEqual(answer.isoformat(), '2015-08-11T15:33:00+00:00')
 
     @report_success_status
     def test_single_location_question(self):
