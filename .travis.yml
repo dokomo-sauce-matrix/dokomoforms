@@ -50,7 +50,7 @@ addons:
   sauce_connect: true
 
 before_install:
-  - pip install selenium beautifulsoup4 py-dateutil
+  - pip install selenium beautifulsoup4 py-dateutil pytz
 
 before_script:
   - psql -c 'create database doko;' -U postgres
